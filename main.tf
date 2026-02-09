@@ -412,19 +412,17 @@ locals {
   }
 
   # Helper function to extract base domain from full domain
-  # e.g., "docs.boring.tech" -> "boring.tech"
-  # e.g., "boringpsych.com" -> "boringpsych.com"
+  # Uses a whitelist approach based on known hosted zones
   domain_to_base = {
     for key, site in local.nextjs_sites :
     key => (
-      # Check if it's a subdomain by counting dots
-      length(regexall("\\.", site.domain_name)) > 1 ?
-      # If subdomain, take last two parts (e.g., "boring.tech" from "docs.boring.tech")
-      join(".", [
-        element(split(".", site.domain_name), length(split(".", site.domain_name)) - 2),
-        element(split(".", site.domain_name), length(split(".", site.domain_name)) - 1)
-      ]) :
-      # Otherwise, use the domain as-is
+      # Check against known base domains in order
+      can(regex("boring\\.tech$", site.domain_name)) ? "boring.tech" :
+      can(regex("boringpsych\\.com$", site.domain_name)) ? "boringpsych.com" :
+      can(regex("jouvencemedicalspa\\.com$", site.domain_name)) ? "jouvencemedicalspa.com" :
+      can(regex("boringmd\\.org$", site.domain_name)) ? "boringmd.org" :
+      can(regex("falconmdpa\\.com$", site.domain_name)) ? "falconmdpa.com" :
+      # If no match, assume it's already a base domain
       site.domain_name
     )
   }
@@ -456,7 +454,7 @@ locals {
   # Map each site to its certificate
   site_to_cert = {
     for key, site in local.nextjs_sites :
-    key => lookup(local.cert_map, local.domain_to_base[key], aws_acm_certificate_validation.wildcard.certificate_arn)
+    key => lookup(local.cert_map, local.domain_to_base[key], aws_acm_certificate_validation.domain_certs["boring.tech"].certificate_arn)
   }
 }
 
