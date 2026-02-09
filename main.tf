@@ -275,7 +275,7 @@ resource "aws_acm_certificate" "domain_certs" {
 # DNS validation for all certificates - separate resources per domain to avoid dynamic for_each keys
 resource "aws_route53_record" "cert_validation_boring_com" {
   for_each = {
-    for dvo in aws_acm_certificate.domain_certs["boring.com"].domain_validation_options : dvo.domain_name => {
+    for dvo in aws_acm_certificate.domain_certs["boring.com"].domain_validation_options : dvo.resource_record_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
@@ -292,7 +292,7 @@ resource "aws_route53_record" "cert_validation_boring_com" {
 
 resource "aws_route53_record" "cert_validation_boring_tech" {
   for_each = {
-    for dvo in aws_acm_certificate.domain_certs["boring.tech"].domain_validation_options : dvo.domain_name => {
+    for dvo in aws_acm_certificate.domain_certs["boring.tech"].domain_validation_options : dvo.resource_record_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
@@ -309,7 +309,7 @@ resource "aws_route53_record" "cert_validation_boring_tech" {
 
 resource "aws_route53_record" "cert_validation_boringpsych" {
   for_each = {
-    for dvo in aws_acm_certificate.domain_certs["boringpsych.com"].domain_validation_options : dvo.domain_name => {
+    for dvo in aws_acm_certificate.domain_certs["boringpsych.com"].domain_validation_options : dvo.resource_record_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
@@ -326,7 +326,7 @@ resource "aws_route53_record" "cert_validation_boringpsych" {
 
 resource "aws_route53_record" "cert_validation_jouvencemedicalspa" {
   for_each = {
-    for dvo in aws_acm_certificate.domain_certs["jouvencemedicalspa.com"].domain_validation_options : dvo.domain_name => {
+    for dvo in aws_acm_certificate.domain_certs["jouvencemedicalspa.com"].domain_validation_options : dvo.resource_record_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
@@ -343,7 +343,7 @@ resource "aws_route53_record" "cert_validation_jouvencemedicalspa" {
 
 resource "aws_route53_record" "cert_validation_boringmd" {
   for_each = {
-    for dvo in aws_acm_certificate.domain_certs["boringmd.org"].domain_validation_options : dvo.domain_name => {
+    for dvo in aws_acm_certificate.domain_certs["boringmd.org"].domain_validation_options : dvo.resource_record_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
@@ -360,7 +360,7 @@ resource "aws_route53_record" "cert_validation_boringmd" {
 
 resource "aws_route53_record" "cert_validation_falconmdpa" {
   for_each = {
-    for dvo in aws_acm_certificate.domain_certs["falconmdpa.com"].domain_validation_options : dvo.domain_name => {
+    for dvo in aws_acm_certificate.domain_certs["falconmdpa.com"].domain_validation_options : dvo.resource_record_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
@@ -405,7 +405,7 @@ resource "aws_acm_certificate" "boring_wildcard" {
   }
 
   tags = {
-    Name      = "boring Wildcard Certificate (Legacy)"
+    Name      = "boring Wildcard Certificate - Legacy"
     Project   = "boring"
     ManagedBy = "Terraform"
   }
@@ -414,7 +414,7 @@ resource "aws_acm_certificate" "boring_wildcard" {
 # DNS validation for legacy wildcard certificate
 resource "aws_route53_record" "wildcard_validation" {
   for_each = {
-    for dvo in aws_acm_certificate.boring_wildcard.domain_validation_options : dvo.domain_name => {
+    for dvo in aws_acm_certificate.boring_wildcard.domain_validation_options : dvo.resource_record_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
