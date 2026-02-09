@@ -272,20 +272,14 @@ resource "aws_acm_certificate" "domain_certs" {
   }
 }
 
-# DNS validation for all certificates
-resource "aws_route53_record" "cert_validation" {
+# DNS validation for all certificates - separate resources per domain to avoid dynamic for_each keys
+resource "aws_route53_record" "cert_validation_boring_com" {
   for_each = {
-    for dvo in flatten([
-      for domain, cert in aws_acm_certificate.domain_certs : [
-        for validation in cert.domain_validation_options : {
-          domain  = domain
-          name    = validation.resource_record_name
-          record  = validation.resource_record_value
-          type    = validation.resource_record_type
-          zone_id = local.domain_certificates[domain].zone_id
-        }
-      ]
-    ]) : "${dvo.domain}-${dvo.name}" => dvo
+    for dvo in aws_acm_certificate.domain_certs["boring.com"].domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
   }
 
   allow_overwrite = true
@@ -293,7 +287,92 @@ resource "aws_route53_record" "cert_validation" {
   records         = [each.value.record]
   ttl             = 60
   type            = each.value.type
-  zone_id         = each.value.zone_id
+  zone_id         = local.domain_certificates["boring.com"].zone_id
+}
+
+resource "aws_route53_record" "cert_validation_boring_tech" {
+  for_each = {
+    for dvo in aws_acm_certificate.domain_certs["boring.tech"].domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = local.domain_certificates["boring.tech"].zone_id
+}
+
+resource "aws_route53_record" "cert_validation_boringpsych" {
+  for_each = {
+    for dvo in aws_acm_certificate.domain_certs["boringpsych.com"].domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = local.domain_certificates["boringpsych.com"].zone_id
+}
+
+resource "aws_route53_record" "cert_validation_jouvencemedicalspa" {
+  for_each = {
+    for dvo in aws_acm_certificate.domain_certs["jouvencemedicalspa.com"].domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = local.domain_certificates["jouvencemedicalspa.com"].zone_id
+}
+
+resource "aws_route53_record" "cert_validation_boringmd" {
+  for_each = {
+    for dvo in aws_acm_certificate.domain_certs["boringmd.org"].domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = local.domain_certificates["boringmd.org"].zone_id
+}
+
+resource "aws_route53_record" "cert_validation_falconmdpa" {
+  for_each = {
+    for dvo in aws_acm_certificate.domain_certs["falconmdpa.com"].domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = local.domain_certificates["falconmdpa.com"].zone_id
 }
 
 resource "aws_acm_certificate_validation" "domain_certs" {
@@ -301,10 +380,14 @@ resource "aws_acm_certificate_validation" "domain_certs" {
   provider = aws.us_east_1
 
   certificate_arn = aws_acm_certificate.domain_certs[each.key].arn
-  validation_record_fqdns = [
-    for record in aws_route53_record.cert_validation :
-    record.fqdn if startswith(record.id, each.key)
-  ]
+  validation_record_fqdns = concat(
+    each.key == "boring.com" ? [for record in aws_route53_record.cert_validation_boring_com : record.fqdn] : [],
+    each.key == "boring.tech" ? [for record in aws_route53_record.cert_validation_boring_tech : record.fqdn] : [],
+    each.key == "boringpsych.com" ? [for record in aws_route53_record.cert_validation_boringpsych : record.fqdn] : [],
+    each.key == "jouvencemedicalspa.com" ? [for record in aws_route53_record.cert_validation_jouvencemedicalspa : record.fqdn] : [],
+    each.key == "boringmd.org" ? [for record in aws_route53_record.cert_validation_boringmd : record.fqdn] : [],
+    each.key == "falconmdpa.com" ? [for record in aws_route53_record.cert_validation_falconmdpa : record.fqdn] : []
+  )
 }
 
 # Legacy reference for backward compatibility
