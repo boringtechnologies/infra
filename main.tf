@@ -167,8 +167,8 @@ resource "aws_api_gateway_stage" "prod" {
 
 # API Gateway Custom Domain
 resource "aws_api_gateway_domain_name" "api" {
-  domain_name              = "api.boring.com"
-  regional_certificate_arn = aws_acm_certificate_validation.wildcard.certificate_arn
+  domain_name              = "api.boring.tech"
+  regional_certificate_arn = aws_acm_certificate_validation.domain_certs["boring.tech"].certificate_arn
 
   endpoint_configuration {
     types = ["REGIONAL"]
@@ -188,10 +188,10 @@ resource "aws_api_gateway_base_path_mapping" "api" {
   domain_name = aws_api_gateway_domain_name.api.domain_name
 }
 
-# Route53 A Record for api.boring.com
+# Route53 A Record for api.boring.tech
 resource "aws_route53_record" "api" {
   zone_id = data.aws_route53_zone.boring.zone_id
-  name    = "api.boring.com"
+  name    = "api.boring.tech"
   type    = "A"
 
   alias {
@@ -219,11 +219,6 @@ output "lambda_endpoints" {
 locals {
   # Map of domain certificates
   domain_certificates = {
-    "boring.com" = {
-      zone_id                   = data.aws_route53_zone.boring.zone_id
-      domain_name               = "*.boring.com"
-      subject_alternative_names = ["boring.com", "*.dev.boring.com"]
-    }
     "boring.tech" = {
       zone_id                   = data.aws_route53_zone.boring.zone_id
       domain_name               = "*.boring.tech"
@@ -273,23 +268,6 @@ resource "aws_acm_certificate" "domain_certs" {
 }
 
 # DNS validation for all certificates - separate resources per domain to avoid dynamic for_each keys
-resource "aws_route53_record" "cert_validation_boring_com" {
-  for_each = {
-    for dvo in aws_acm_certificate.domain_certs["boring.com"].domain_validation_options : dvo.resource_record_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }
-  }
-
-  allow_overwrite = true
-  name            = each.value.name
-  records         = [each.value.record]
-  ttl             = 60
-  type            = each.value.type
-  zone_id         = local.domain_certificates["boring.com"].zone_id
-}
-
 resource "aws_route53_record" "cert_validation_boring_tech" {
   for_each = {
     for dvo in aws_acm_certificate.domain_certs["boring.tech"].domain_validation_options : dvo.resource_record_name => {
@@ -381,58 +359,12 @@ resource "aws_acm_certificate_validation" "domain_certs" {
 
   certificate_arn = aws_acm_certificate.domain_certs[each.key].arn
   validation_record_fqdns = concat(
-    each.key == "boring.com" ? [for record in aws_route53_record.cert_validation_boring_com : record.fqdn] : [],
     each.key == "boring.tech" ? [for record in aws_route53_record.cert_validation_boring_tech : record.fqdn] : [],
     each.key == "boringpsych.com" ? [for record in aws_route53_record.cert_validation_boringpsych : record.fqdn] : [],
     each.key == "jouvencemedicalspa.com" ? [for record in aws_route53_record.cert_validation_jouvencemedicalspa : record.fqdn] : [],
     each.key == "boringmd.org" ? [for record in aws_route53_record.cert_validation_boringmd : record.fqdn] : [],
     each.key == "falconmdpa.com" ? [for record in aws_route53_record.cert_validation_falconmdpa : record.fqdn] : []
   )
-}
-
-# Legacy reference for backward compatibility
-resource "aws_acm_certificate" "boring_wildcard" {
-  provider    = aws.us_east_1
-  domain_name = "*.boring.com"
-  subject_alternative_names = [
-    "boring.com",
-    "*.dev.boring.com"
-  ]
-  validation_method = "DNS"
-
-  lifecycle {
-    create_before_destroy = true
-  }
-
-  tags = {
-    Name      = "boring Wildcard Certificate - Legacy"
-    Project   = "boring"
-    ManagedBy = "Terraform"
-  }
-}
-
-# DNS validation for legacy wildcard certificate
-resource "aws_route53_record" "wildcard_validation" {
-  for_each = {
-    for dvo in aws_acm_certificate.boring_wildcard.domain_validation_options : dvo.resource_record_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }
-  }
-
-  allow_overwrite = true
-  name            = each.value.name
-  records         = [each.value.record]
-  ttl             = 60
-  type            = each.value.type
-  zone_id         = data.aws_route53_zone.boring.zone_id
-}
-
-resource "aws_acm_certificate_validation" "wildcard" {
-  provider                = aws.us_east_1
-  certificate_arn         = aws_acm_certificate.boring_wildcard.arn
-  validation_record_fqdns = [for record in aws_route53_record.wildcard_validation : record.fqdn]
 }
 
 # Define all your NextJS sites with pipeline config
