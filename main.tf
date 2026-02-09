@@ -274,14 +274,14 @@ resource "aws_route53_record" "cert_validation_boring_tech" {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
-    }
+    }...
   }
 
   allow_overwrite = true
-  name            = each.value.name
-  records         = [each.value.record]
+  name            = each.value[0].name
+  records         = [each.value[0].record]
   ttl             = 60
-  type            = each.value.type
+  type            = each.value[0].type
   zone_id         = local.domain_certificates["boring.tech"].zone_id
 }
 
@@ -291,14 +291,14 @@ resource "aws_route53_record" "cert_validation_boringpsych" {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
-    }
+    }...
   }
 
   allow_overwrite = true
-  name            = each.value.name
-  records         = [each.value.record]
+  name            = each.value[0].name
+  records         = [each.value[0].record]
   ttl             = 60
-  type            = each.value.type
+  type            = each.value[0].type
   zone_id         = local.domain_certificates["boringpsych.com"].zone_id
 }
 
@@ -308,14 +308,14 @@ resource "aws_route53_record" "cert_validation_jouvencemedicalspa" {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
-    }
+    }...
   }
 
   allow_overwrite = true
-  name            = each.value.name
-  records         = [each.value.record]
+  name            = each.value[0].name
+  records         = [each.value[0].record]
   ttl             = 60
-  type            = each.value.type
+  type            = each.value[0].type
   zone_id         = local.domain_certificates["jouvencemedicalspa.com"].zone_id
 }
 
@@ -325,14 +325,14 @@ resource "aws_route53_record" "cert_validation_boringmd" {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
-    }
+    }...
   }
 
   allow_overwrite = true
-  name            = each.value.name
-  records         = [each.value.record]
+  name            = each.value[0].name
+  records         = [each.value[0].record]
   ttl             = 60
-  type            = each.value.type
+  type            = each.value[0].type
   zone_id         = local.domain_certificates["boringmd.org"].zone_id
 }
 
@@ -342,14 +342,14 @@ resource "aws_route53_record" "cert_validation_falconmdpa" {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
-    }
+    }...
   }
 
   allow_overwrite = true
-  name            = each.value.name
-  records         = [each.value.record]
+  name            = each.value[0].name
+  records         = [each.value[0].record]
   ttl             = 60
-  type            = each.value.type
+  type            = each.value[0].type
   zone_id         = local.domain_certificates["falconmdpa.com"].zone_id
 }
 
