@@ -418,38 +418,45 @@ locals {
     for key, site in local.nextjs_sites :
     key => (
       # Check if it's a subdomain by counting dots
-      length(split(".", site.domain_name)) > 2 ?
+      length(regexall("\\.", site.domain_name)) > 1 ?
       # If subdomain, take last two parts (e.g., "boring.tech" from "docs.boring.tech")
-      join(".", slice(split(".", site.domain_name), length(split(".", site.domain_name)) - 2, length(split(".", site.domain_name)))) :
+      join(".", [
+        element(split(".", site.domain_name), length(split(".", site.domain_name)) - 2),
+        element(split(".", site.domain_name), length(split(".", site.domain_name)) - 1)
+      ]) :
       # Otherwise, use the domain as-is
       site.domain_name
     )
   }
 
+  # Lookup map for hosted zones
+  zone_map = {
+    "boring.tech"            = data.aws_route53_zone.boring.zone_id
+    "boringpsych.com"        = data.aws_route53_zone.boringpsych.zone_id
+    "jouvencemedicalspa.com" = data.aws_route53_zone.jouvencemedicalspa.zone_id
+    "boringmd.org"           = data.aws_route53_zone.boringmd.zone_id
+    "falconmdpa.com"         = data.aws_route53_zone.falconmdpa.zone_id
+  }
+
+  # Lookup map for certificates
+  cert_map = {
+    "boring.tech"            = aws_acm_certificate_validation.domain_certs["boring.tech"].certificate_arn
+    "boringpsych.com"        = aws_acm_certificate_validation.domain_certs["boringpsych.com"].certificate_arn
+    "jouvencemedicalspa.com" = aws_acm_certificate_validation.domain_certs["jouvencemedicalspa.com"].certificate_arn
+    "boringmd.org"           = aws_acm_certificate_validation.domain_certs["boringmd.org"].certificate_arn
+    "falconmdpa.com"         = aws_acm_certificate_validation.domain_certs["falconmdpa.com"].certificate_arn
+  }
+
   # Map each site to its hosted zone
   site_to_zone = {
     for key, site in local.nextjs_sites :
-    key => (
-      local.domain_to_base[key] == "boring.tech" ? data.aws_route53_zone.boring.zone_id :
-      local.domain_to_base[key] == "boringpsych.com" ? data.aws_route53_zone.boringpsych.zone_id :
-      local.domain_to_base[key] == "jouvencemedicalspa.com" ? data.aws_route53_zone.jouvencemedicalspa.zone_id :
-      local.domain_to_base[key] == "boringmd.org" ? data.aws_route53_zone.boringmd.zone_id :
-      local.domain_to_base[key] == "falconmdpa.com" ? data.aws_route53_zone.falconmdpa.zone_id :
-      data.aws_route53_zone.boring.zone_id # fallback
-    )
+    key => lookup(local.zone_map, local.domain_to_base[key], data.aws_route53_zone.boring.zone_id)
   }
 
   # Map each site to its certificate
   site_to_cert = {
     for key, site in local.nextjs_sites :
-    key => (
-      local.domain_to_base[key] == "boring.tech" ? aws_acm_certificate_validation.domain_certs["boring.tech"].certificate_arn :
-      local.domain_to_base[key] == "boringpsych.com" ? aws_acm_certificate_validation.domain_certs["boringpsych.com"].certificate_arn :
-      local.domain_to_base[key] == "jouvencemedicalspa.com" ? aws_acm_certificate_validation.domain_certs["jouvencemedicalspa.com"].certificate_arn :
-      local.domain_to_base[key] == "boringmd.org" ? aws_acm_certificate_validation.domain_certs["boringmd.org"].certificate_arn :
-      local.domain_to_base[key] == "falconmdpa.com" ? aws_acm_certificate_validation.domain_certs["falconmdpa.com"].certificate_arn :
-      aws_acm_certificate_validation.wildcard.certificate_arn # fallback to legacy for boring.com
-    )
+    key => lookup(local.cert_map, local.domain_to_base[key], aws_acm_certificate_validation.wildcard.certificate_arn)
   }
 }
 
