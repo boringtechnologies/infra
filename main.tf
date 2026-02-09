@@ -371,7 +371,7 @@ resource "aws_acm_certificate_validation" "domain_certs" {
 locals {
   nextjs_sites = {
     boring-web = {
-      domain_name   = "boring.tech"
+      domain_name   = "dev.boring.tech"
       github_repo   = "boringtechnologies/boring-web"
       github_branch = "prod"
       enable_cicd   = true
@@ -380,7 +380,7 @@ locals {
       }
     }
     psych-web = {
-      domain_name   = "boringpsych.com"
+      domain_name   = "dev.boringpsych.com"
       github_repo   = "boringtechnologies/psych-web"
       github_branch = "prod"
       enable_cicd   = true
@@ -389,7 +389,7 @@ locals {
       }
     }
     bca-web = {
-      domain_name   = "boringmd.org"
+      domain_name   = "dev.boringmd.org"
       github_repo   = "boringtechnologies/bca-web"
       github_branch = "prod"
       enable_cicd   = true
@@ -398,7 +398,7 @@ locals {
       }
     }
     medspa-web = {
-      domain_name   = "jouvencemedicalspa.com"
+      domain_name   = "dev.jouvencemedicalspa.com"
       github_repo   = "boring-dev/portal"
       github_branch = "prod"
       enable_cicd   = true
