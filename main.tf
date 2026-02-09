@@ -23,15 +23,60 @@ provider "aws" {
 
 data "aws_caller_identity" "current" {}
 
-# Add this - lookup your existing Route53 hosted zone
+# KMS Key for Lambda encryption (created first, policy added later)
+resource "aws_kms_key" "lambda_encryption" {
+  description             = "KMS key for boring Lambda encryption"
+  deletion_window_in_days = 10
+  enable_key_rotation     = true
+
+  tags = {
+    Name      = "boring Lambda Encryption Key"
+    Project   = "boring"
+    ManagedBy = "Terraform"
+  }
+}
+
+# KMS Key Alias
+resource "aws_kms_alias" "lambda_encryption" {
+  name          = "alias/boring-cookie-kms-key"
+  target_key_id = aws_kms_key.lambda_encryption.key_id
+}
+
+# Add this - lookup your existing Route53 hosted zones
 data "aws_route53_zone" "boring" {
   name         = "boring.tech"
+  private_zone = false
+}
+
+data "aws_route53_zone" "boringpsych" {
+  name         = "boringpsych.com"
+  private_zone = false
+}
+
+data "aws_route53_zone" "jouvencemedicalspa" {
+  name         = "jouvencemedicalspa.com"
+  private_zone = false
+}
+
+data "aws_route53_zone" "boringmd" {
+  name         = "boringmd.org"
+  private_zone = false
+}
+
+data "aws_route53_zone" "falconmdpa" {
+  name         = "falconmdpa.com"
   private_zone = false
 }
 
 # Shared API Gateway
 module "api_gateway" {
   source = "./modules/api-gateway"
+}
+
+# IAM roles for Lambda functions
+module "iam" {
+  source      = "./modules/iam"
+  kms_key_arn = aws_kms_key.lambda_encryption.arn
 }
 
 locals {
@@ -61,17 +106,17 @@ locals {
   }
 
   env_vars_dev = merge(local.env_vars_common, {
-    STRIPE_SECRET_KEY        = var.stripe_secret_key_dev
-    WEBHOOK_SIGNING_SECRET   = var.webhook_signing_secret_dev
-    PRICE_CENTS              = tostring(var.stripe_price_cents)
-    PRODUCT_ID               = var.stripe_product_id
+    STRIPE_SECRET_KEY      = var.stripe_secret_key_dev
+    WEBHOOK_SIGNING_SECRET = var.webhook_signing_secret_dev
+    PRICE_CENTS            = tostring(var.stripe_price_cents)
+    PRODUCT_ID             = var.stripe_product_id
   })
 
   env_vars_production = merge(local.env_vars_common, {
-    STRIPE_SECRET_KEY        = var.stripe_secret_key_prod
-    WEBHOOK_SIGNING_SECRET   = var.webhook_signing_secret_prod
-    PRICE_CENTS              = tostring(var.stripe_price_cents)
-    PRODUCT_ID               = var.stripe_product_id
+    STRIPE_SECRET_KEY      = var.stripe_secret_key_prod
+    WEBHOOK_SIGNING_SECRET = var.webhook_signing_secret_prod
+    PRICE_CENTS            = tostring(var.stripe_price_cents)
+    PRODUCT_ID             = var.stripe_product_id
   })
 }
 
@@ -79,12 +124,12 @@ module "lambdas" {
   source   = "./modules/lambda-endpoint"
   for_each = local.lambda_configs # This loops through all lambda names
 
-  lambda_name      = "boring-${each.key}"
-  lambda_zip_path  = "./modules/lambda/${each.key}/lambda.zip"
-  role_arn         = module.iam.lambda_exec_role_arn
-  region           = var.region
-  path_part        = each.key
-  
+  lambda_name     = "boring-${each.key}"
+  lambda_zip_path = "./modules/lambda/${each.key}/lambda.zip"
+  role_arn        = module.iam.lambda_exec_role_arn
+  region          = var.region
+  path_part       = each.key
+
   rest_api_id        = module.api_gateway.rest_api_id
   parent_resource_id = module.api_gateway.root_resource_id
   execution_arn      = module.api_gateway.execution_arn
@@ -170,10 +215,102 @@ output "lambda_endpoints" {
 }
 
 
-# Certificate for all *.boring.com sites (if using custom domains)
+# Certificates for all domains
+locals {
+  # Map of domain certificates
+  domain_certificates = {
+    "boring.com" = {
+      zone_id                   = data.aws_route53_zone.boring.zone_id
+      domain_name               = "*.boring.com"
+      subject_alternative_names = ["boring.com", "*.dev.boring.com"]
+    }
+    "boring.tech" = {
+      zone_id                   = data.aws_route53_zone.boring.zone_id
+      domain_name               = "*.boring.tech"
+      subject_alternative_names = ["boring.tech"]
+    }
+    "boringpsych.com" = {
+      zone_id                   = data.aws_route53_zone.boringpsych.zone_id
+      domain_name               = "*.boringpsych.com"
+      subject_alternative_names = ["boringpsych.com"]
+    }
+    "jouvencemedicalspa.com" = {
+      zone_id                   = data.aws_route53_zone.jouvencemedicalspa.zone_id
+      domain_name               = "*.jouvencemedicalspa.com"
+      subject_alternative_names = ["jouvencemedicalspa.com"]
+    }
+    "boringmd.org" = {
+      zone_id                   = data.aws_route53_zone.boringmd.zone_id
+      domain_name               = "*.boringmd.org"
+      subject_alternative_names = ["boringmd.org"]
+    }
+    "falconmdpa.com" = {
+      zone_id                   = data.aws_route53_zone.falconmdpa.zone_id
+      domain_name               = "*.falconmdpa.com"
+      subject_alternative_names = ["falconmdpa.com"]
+    }
+  }
+}
+
+# Create ACM certificates for all domains
+resource "aws_acm_certificate" "domain_certs" {
+  for_each = local.domain_certificates
+  provider = aws.us_east_1
+
+  domain_name               = each.value.domain_name
+  subject_alternative_names = each.value.subject_alternative_names
+  validation_method         = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = {
+    Name      = "${each.key} Wildcard Certificate"
+    Project   = "boring"
+    ManagedBy = "Terraform"
+  }
+}
+
+# DNS validation for all certificates
+resource "aws_route53_record" "cert_validation" {
+  for_each = {
+    for dvo in flatten([
+      for domain, cert in aws_acm_certificate.domain_certs : [
+        for validation in cert.domain_validation_options : {
+          domain  = domain
+          name    = validation.resource_record_name
+          record  = validation.resource_record_value
+          type    = validation.resource_record_type
+          zone_id = local.domain_certificates[domain].zone_id
+        }
+      ]
+    ]) : "${dvo.domain}-${dvo.name}" => dvo
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = each.value.zone_id
+}
+
+resource "aws_acm_certificate_validation" "domain_certs" {
+  for_each = local.domain_certificates
+  provider = aws.us_east_1
+
+  certificate_arn = aws_acm_certificate.domain_certs[each.key].arn
+  validation_record_fqdns = [
+    for record in aws_route53_record.cert_validation :
+    record.fqdn if startswith(record.id, each.key)
+  ]
+}
+
+# Legacy reference for backward compatibility
 resource "aws_acm_certificate" "boring_wildcard" {
-  provider          = aws.us_east_1
-  domain_name       = "*.boring.com"
+  provider    = aws.us_east_1
+  domain_name = "*.boring.com"
   subject_alternative_names = [
     "boring.com",
     "*.dev.boring.com"
@@ -185,13 +322,13 @@ resource "aws_acm_certificate" "boring_wildcard" {
   }
 
   tags = {
-    Name      = "boring Wildcard Certificate"
+    Name      = "boring Wildcard Certificate (Legacy)"
     Project   = "boring"
     ManagedBy = "Terraform"
   }
 }
 
-# DNS validation for wildcard certificate
+# DNS validation for legacy wildcard certificate
 resource "aws_route53_record" "wildcard_validation" {
   for_each = {
     for dvo in aws_acm_certificate.boring_wildcard.domain_validation_options : dvo.domain_name => {
@@ -218,40 +355,40 @@ resource "aws_acm_certificate_validation" "wildcard" {
 # Define all your NextJS sites with pipeline config
 locals {
   nextjs_sites = {
-    boring-web = { 
+    boring-web = {
       domain_name   = "boring.tech"
       github_repo   = "boringtechnologies/boring-web"
       github_branch = "prod"
       enable_cicd   = true
-      basic_auth    = {
+      basic_auth = {
         enabled = false
       }
     }
-    psych-web = { 
+    psych-web = {
       domain_name   = "boringpsych.com"
       github_repo   = "boringtechnologies/psych-web"
       github_branch = "prod"
       enable_cicd   = true
-      basic_auth    = {
+      basic_auth = {
         enabled = false
       }
     }
-    bca-web = { 
+    bca-web = {
       domain_name   = "boringmd.org"
       github_repo   = "boringtechnologies/bca-web"
       github_branch = "prod"
       enable_cicd   = true
-      basic_auth    = {
+      basic_auth = {
         enabled = false
       }
     }
-    medspa-web = { 
+    medspa-web = {
       domain_name   = "jouvencemedicalspa.com"
       github_repo   = "boring-dev/portal"
       github_branch = "prod"
       enable_cicd   = true
-      basic_auth    = {
-        enabled  = false
+      basic_auth = {
+        enabled = false
       }
     }
     docs = {
@@ -259,7 +396,7 @@ locals {
       github_repo   = "boring-dev/docs"
       github_branch = "prod"
       enable_cicd   = true
-      basic_auth    = {
+      basic_auth = {
         enabled = false
       }
     }
@@ -268,10 +405,51 @@ locals {
       github_repo   = ""
       github_branch = ""
       enable_cicd   = false
-      basic_auth    = {
+      basic_auth = {
         enabled = false
       }
     }
+  }
+
+  # Helper function to extract base domain from full domain
+  # e.g., "docs.boring.tech" -> "boring.tech"
+  # e.g., "boringpsych.com" -> "boringpsych.com"
+  domain_to_base = {
+    for key, site in local.nextjs_sites :
+    key => (
+      # Check if it's a subdomain by counting dots
+      length(split(".", site.domain_name)) > 2 ?
+      # If subdomain, take last two parts (e.g., "boring.tech" from "docs.boring.tech")
+      join(".", slice(split(".", site.domain_name), length(split(".", site.domain_name)) - 2, length(split(".", site.domain_name)))) :
+      # Otherwise, use the domain as-is
+      site.domain_name
+    )
+  }
+
+  # Map each site to its hosted zone
+  site_to_zone = {
+    for key, site in local.nextjs_sites :
+    key => (
+      local.domain_to_base[key] == "boring.tech" ? data.aws_route53_zone.boring.zone_id :
+      local.domain_to_base[key] == "boringpsych.com" ? data.aws_route53_zone.boringpsych.zone_id :
+      local.domain_to_base[key] == "jouvencemedicalspa.com" ? data.aws_route53_zone.jouvencemedicalspa.zone_id :
+      local.domain_to_base[key] == "boringmd.org" ? data.aws_route53_zone.boringmd.zone_id :
+      local.domain_to_base[key] == "falconmdpa.com" ? data.aws_route53_zone.falconmdpa.zone_id :
+      data.aws_route53_zone.boring.zone_id # fallback
+    )
+  }
+
+  # Map each site to its certificate
+  site_to_cert = {
+    for key, site in local.nextjs_sites :
+    key => (
+      local.domain_to_base[key] == "boring.tech" ? aws_acm_certificate_validation.domain_certs["boring.tech"].certificate_arn :
+      local.domain_to_base[key] == "boringpsych.com" ? aws_acm_certificate_validation.domain_certs["boringpsych.com"].certificate_arn :
+      local.domain_to_base[key] == "jouvencemedicalspa.com" ? aws_acm_certificate_validation.domain_certs["jouvencemedicalspa.com"].certificate_arn :
+      local.domain_to_base[key] == "boringmd.org" ? aws_acm_certificate_validation.domain_certs["boringmd.org"].certificate_arn :
+      local.domain_to_base[key] == "falconmdpa.com" ? aws_acm_certificate_validation.domain_certs["falconmdpa.com"].certificate_arn :
+      aws_acm_certificate_validation.wildcard.certificate_arn # fallback to legacy for boring.com
+    )
   }
 }
 
@@ -282,8 +460,8 @@ module "nextjs_sites" {
 
   bucket_name         = "boring-${each.key}"
   domain_name         = each.value.domain_name
-  acm_certificate_arn = aws_acm_certificate_validation.wildcard.certificate_arn
-  route53_zone_id     = data.aws_route53_zone.boring.zone_id
+  acm_certificate_arn = local.site_to_cert[each.key]
+  route53_zone_id     = local.site_to_zone[each.key]
   price_class         = "PriceClass_100"
 
   # Add basic auth configuration
@@ -297,10 +475,10 @@ output "nextjs_sites" {
   value = {
     for key, site in module.nextjs_sites :
     key => {
-      url                = site.website_url
-      bucket_name        = site.bucket_name
-      cloudfront_id      = site.cloudfront_id
-      cloudfront_domain  = site.cloudfront_domain_name
+      url               = site.website_url
+      bucket_name       = site.bucket_name
+      cloudfront_id     = site.cloudfront_id
+      cloudfront_domain = site.cloudfront_domain_name
     }
   }
 }
@@ -358,10 +536,10 @@ resource "null_resource" "build_stripe_layer" {
 # Stripe Lambda Layer
 resource "aws_lambda_layer_version" "stripe" {
   depends_on = [null_resource.build_stripe_layer]
-  
+
   filename   = "${path.module}/lambda-layers/stripe-layer.zip"
   layer_name = "boring-stripe-layer"
-  
+
   compatible_runtimes = ["python3.13"]
 }
 
@@ -378,33 +556,14 @@ resource "null_resource" "build_common_layer" {
 
 resource "aws_lambda_layer_version" "common" {
   depends_on = [null_resource.build_common_layer]
-  
+
   filename   = "${path.module}/lambda-layers/common-layer.zip"
   layer_name = "boring-common-layer"
-  
+
   compatible_runtimes = ["python3.13"]
 }
 
-# KMS Key for Lambda encryption
-resource "aws_kms_key" "lambda_encryption" {
-  description             = "KMS key for boring Lambda encryption"
-  deletion_window_in_days = 10
-  enable_key_rotation     = true
-
-  tags = {
-    Name      = "boring Lambda Encryption Key"
-    Project   = "boring"
-    ManagedBy = "Terraform"
-  }
-}
-
-# KMS Key Alias
-resource "aws_kms_alias" "lambda_encryption" {
-  name          = "alias/boring-cookie-kms-key"
-  target_key_id = aws_kms_key.lambda_encryption.key_id
-}
-
-# KMS Key Policy (allow Lambda to use it)
+# KMS Key Policy (allow Lambda to use it) - added after IAM module to avoid circular dependency
 resource "aws_kms_key_policy" "lambda_encryption" {
   key_id = aws_kms_key.lambda_encryption.id
 

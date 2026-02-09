@@ -1,0 +1,24 @@
+# Terraform files
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!terraform.tfvars.example
+
+# Lambda layer zip files
+lambda-layers/*.zip
+
+# Lambda function zip files  
+modules/lambda/*/lambda.zip
+
+# OS files
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.iml
