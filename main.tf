@@ -283,6 +283,10 @@ resource "aws_route53_record" "cert_validation_boring_tech" {
   ttl             = 60
   type            = each.value[0].type
   zone_id         = local.domain_certificates["boring.tech"].zone_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_route53_record" "cert_validation_boringpsych" {
@@ -300,6 +304,10 @@ resource "aws_route53_record" "cert_validation_boringpsych" {
   ttl             = 60
   type            = each.value[0].type
   zone_id         = local.domain_certificates["boringpsych.com"].zone_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_route53_record" "cert_validation_jouvencemedicalspa" {
@@ -317,6 +325,10 @@ resource "aws_route53_record" "cert_validation_jouvencemedicalspa" {
   ttl             = 60
   type            = each.value[0].type
   zone_id         = local.domain_certificates["jouvencemedicalspa.com"].zone_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_route53_record" "cert_validation_boringmd" {
@@ -334,6 +346,10 @@ resource "aws_route53_record" "cert_validation_boringmd" {
   ttl             = 60
   type            = each.value[0].type
   zone_id         = local.domain_certificates["boringmd.org"].zone_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_route53_record" "cert_validation_falconmdpa" {
@@ -351,6 +367,10 @@ resource "aws_route53_record" "cert_validation_falconmdpa" {
   ttl             = 60
   type            = each.value[0].type
   zone_id         = local.domain_certificates["falconmdpa.com"].zone_id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_acm_certificate_validation" "domain_certs" {
