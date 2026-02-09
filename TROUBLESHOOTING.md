@@ -8,8 +8,8 @@ You may encounter this error when running `terraform plan` or `terraform apply`:
 Error: reading Route 53 Record (Z08845243VQND4TLD1KVI__31f76782931b2385bcfbf1fc1f8ea5ea.jouvencemedicalspa.com._CNAME): empty result
 
   with aws_route53_record.cert_validation_jouvencemedicalspa["_31f76782931b2385bcfbf1fc1f8ea5ea.jouvencemedicalspa.com."],
-  on main.tf line 305, in resource "aws_route53_record" "cert_validation_jouvencemedicalspa":
- 305: resource "aws_route53_record" "cert_validation_jouvencemedicalspa" {
+  on main.tf line 313, in resource "aws_route53_record" "cert_validation_jouvencemedicalspa":
+ 313: resource "aws_route53_record" "cert_validation_jouvencemedicalspa" {
 ```
 
 ## Root Cause
@@ -37,6 +37,10 @@ terraform apply
 Alternatively, use the provided script:
 
 ```bash
+# Make the script executable if needed
+chmod +x fix-state-drift.sh
+
+# Run the script
 ./fix-state-drift.sh
 ```
 
