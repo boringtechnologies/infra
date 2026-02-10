@@ -391,7 +391,7 @@ resource "aws_acm_certificate_validation" "domain_certs" {
 locals {
   nextjs_sites = {
     boring-web = {
-      domain_name   = "dev.boring.tech"
+      domain_name   = "boring.tech"
       github_repo   = "boringtechnologies/boring-web"
       github_branch = "prod"
       enable_cicd   = true
