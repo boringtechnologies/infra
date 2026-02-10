@@ -426,15 +426,6 @@ locals {
         enabled = false
       }
     }
-    docs = {
-      domain_name   = "docs.boring.tech"
-      github_repo   = "boringtechnologies/docs"
-      github_branch = "prod"
-      enable_cicd   = true
-      basic_auth = {
-        enabled = false
-      }
-    }
     records = {
       domain_name   = "records.boring.tech"
       github_repo   = ""
