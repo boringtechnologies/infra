@@ -1,8 +1,86 @@
 # Troubleshooting Guide
 
 ## Table of Contents
-1. [Route53 Certificate Validation State Drift](#route53-certificate-validation-state-drift)
-2. [API Gateway Service-Linked Role Permissions](#api-gateway-service-linked-role-permissions)
+1. [GitHub Connector Not Seeing Repository](#github-connector-not-seeing-repository)
+2. [Route53 Certificate Validation State Drift](#route53-certificate-validation-state-drift)
+3. [API Gateway Permissions Issues](#api-gateway-permissions-issues)
+
+---
+
+## GitHub Connector Not Seeing Repository
+
+### Problem
+
+You may see that the AWS CodeStar GitHub connection is not showing the `infra` repository or other expected repositories in AWS Developer Tools → Connections.
+
+### Root Cause
+
+There are several reasons why a repository might not appear:
+
+1. **The infra repository doesn't need a pipeline** - This infrastructure repository is deployed manually via `terraform apply`, not through AWS CodePipeline
+2. **Connection not activated** - The CodeStar connection must be manually activated after first Terraform deployment
+3. **Wrong GitHub organization** - The connection needs access to the correct GitHub organizations
+4. **AWS Connector app not installed** - GitHub organizations need the AWS Connector app installed
+
+### Solution
+
+#### For the Infra Repository
+
+The `boringtechnologies/infra` repository **intentionally does not appear** in the CodeStar connection because:
+- It has no CodePipeline configured
+- Infrastructure changes are deployed manually using `terraform apply`
+- Only NextJS application repositories need CI/CD pipelines
+
+#### For NextJS Site Repositories
+
+If your application repositories (boring-web, psych-web, etc.) don't appear:
+
+1. **Activate the Connection** (first time only):
+   ```bash
+   # After terraform apply, go to AWS Console
+   # Developer Tools → Connections → boring-github
+   # Click "Update pending connection"
+   # Authorize with GitHub
+   ```
+
+2. **Verify GitHub Organizations**:
+   - Ensure you authorize both `boringtechnologies` and `boring-dev` organizations
+   - Check that you have admin access to these organizations
+
+3. **Install AWS Connector App**:
+   - Go to GitHub → Organization Settings → Installed GitHub Apps
+   - Install "AWS Connector for GitHub" if not present
+   - Grant access to required repositories
+
+4. **Check Repository Access**:
+   ```bash
+   # List which repositories the connection can see
+   aws codestar-connections list-repositories \
+     --connection-arn arn:aws:codestar-connections:REGION:ACCOUNT:connection/CONNECTION_ID
+   ```
+
+#### Configured Repositories
+
+The following repositories are configured in the infrastructure:
+
+- `boringtechnologies/boring-web` → deployed to boring.tech
+- `boringtechnologies/psych-web` → deployed to boringpsych.com
+- `boringtechnologies/bca-web` → deployed to boringmd.org
+- `boring-dev/portal` → deployed to jouvencemedicalspa.com
+- `boring-dev/docs` → deployed to docs.boring.tech
+- `boringtechnologies/infra` → **NO PIPELINE** (manual deployment only)
+
+### Prevention
+
+- The infra repository will never need a CodeStar connection
+- For new application repositories, add them to `local.nextjs_sites` in `main.tf`
+- Always activate the CodeStar connection after first deployment
+- Ensure proper GitHub organization permissions before deploying
+
+### Reference
+
+- AWS CodeStar Connections: https://docs.aws.amazon.com/dtconsole/latest/userguide/connections.html
+- GitHub App Installation: https://docs.github.com/en/apps/using-github-apps/installing-your-own-github-app
 
 ---
 

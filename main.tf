@@ -524,6 +524,22 @@ output "nextjs_sites" {
 }
 
 # CodeStar connection to GitHub (one-time setup)
+# This connection is used for CI/CD pipelines for NextJS application repositories.
+# It does NOT include the 'infra' repository itself (which is deployed manually via terraform).
+# 
+# After first deployment:
+# 1. Go to AWS Console → Developer Tools → Connections
+# 2. Find "boring-github" connection (status: Pending)
+# 3. Click "Update pending connection"
+# 4. Authorize GitHub access for organizations: boringtechnologies, boring-dev
+# 5. Install AWS Connector app in GitHub organizations if needed
+#
+# Configured repositories (for CI/CD):
+# - boringtechnologies/boring-web
+# - boringtechnologies/psych-web
+# - boringtechnologies/bca-web
+# - boring-dev/portal
+# - boring-dev/docs
 resource "aws_codestarconnections_connection" "github" {
   name          = "boring-github"
   provider_type = "GitHub"

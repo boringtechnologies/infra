@@ -131,9 +131,27 @@ Lambda layers will be automatically built using Docker during this step.
 After first deployment, manually activate the CodeStar GitHub connection:
 
 1. Go to AWS Console → Developer Tools → Connections
-2. Find `boring-github` connection
+2. Find `boring-github` connection (status will be "Pending")
 3. Click "Update pending connection"
 4. Authorize GitHub access
+5. Select the GitHub organization/account: `boringtechnologies` and/or `boring-dev`
+6. Click "Connect"
+
+**Important Notes:**
+- The GitHub connection is used for CI/CD pipelines for **NextJS sites only** (boring-web, psych-web, bca-web, etc.)
+- The **infra repository itself does not need a pipeline** - it's managed manually via Terraform
+- After activation, the connection can access the following repositories:
+  - `boringtechnologies/boring-web`
+  - `boringtechnologies/psych-web`
+  - `boringtechnologies/bca-web`
+  - `boring-dev/portal`
+  - `boring-dev/docs`
+
+**Troubleshooting:**
+- If the connection doesn't see your repositories, ensure you've authorized the correct GitHub organization
+- The connection needs access to the organizations where the source repositories are located
+- You may need to install the AWS Connector for GitHub app in your GitHub organization
+- For the `infra` repository: it doesn't appear in the connection because it has no CodePipeline configured (infrastructure changes are deployed via `terraform apply`)
 
 ---
 
