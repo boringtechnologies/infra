@@ -275,7 +275,7 @@ terraform output nextjs_sites
 
 The following resources must be created manually (not managed by Terraform):
 
-1. **Domain Registration** - `boring.com` registered via Route53 or external registrar
+1. **Domain Registration** - `boring.tech` registered via Route53 or external registrar
 2. **GitHub Connection** - Initial CodeStar connection activation (one-time)
 3. **IAM User** - `terraform-infra` user with appropriate permissions
 
@@ -297,7 +297,7 @@ The following resources must be created manually (not managed by Terraform):
 
 ```bash
 aws cloudfront list-conflicting-aliases \
-  --alias www.boring.com \
+  --alias www.boring.tech \
   --distribution-id <YOUR_DIST_ID> \
   --profile boring-tech
 ```

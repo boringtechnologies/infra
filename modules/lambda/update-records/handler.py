@@ -22,7 +22,7 @@ def lambda_handler(event, context):
     print("Incoming cookies token:", cookie_token)
 
     origin = event.get("headers", {}).get("origin", "")  # Note lowercase in API Gateway
-    allowed_origins = ["https://portal.boring.com", "https://portal.dev.boring.com", "http://localhost:3000"]
+    allowed_origins = ["https://portal.boring.tech", "https://portal.dev.boring.tech", "http://localhost:3000"]
     cors_origin = origin if origin in allowed_origins else "null"
 
     # Preflight OPTIONS request
