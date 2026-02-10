@@ -131,9 +131,27 @@ Lambda layers will be automatically built using Docker during this step.
 After first deployment, manually activate the CodeStar GitHub connection:
 
 1. Go to AWS Console → Developer Tools → Connections
-2. Find `boring-github` connection
+2. Find `boring-github` connection (status will be "Pending")
 3. Click "Update pending connection"
 4. Authorize GitHub access
+5. Select the GitHub organization/account: `boringtechnologies` and/or `boring-dev`
+6. Click "Connect"
+
+**Important Notes:**
+- The GitHub connection is used for CI/CD pipelines for **NextJS sites only** (boring-web, psych-web, bca-web, etc.)
+- The **infra repository itself does not need a pipeline** - it's managed manually via Terraform
+- After activation, the connection can access the following repositories:
+  - `boringtechnologies/boring-web`
+  - `boringtechnologies/psych-web`
+  - `boringtechnologies/bca-web`
+  - `boring-dev/portal`
+  - `boring-dev/docs`
+
+**Troubleshooting:**
+- If the connection doesn't see your repositories, ensure you've authorized the correct GitHub organization
+- The connection needs access to the organizations where the source repositories are located
+- You may need to install the AWS Connector for GitHub app in your GitHub organization
+- For the `infra` repository: it doesn't appear in the connection because it has no CodePipeline configured (infrastructure changes are deployed via `terraform apply`)
 
 ---
 
@@ -257,7 +275,7 @@ terraform output nextjs_sites
 
 The following resources must be created manually (not managed by Terraform):
 
-1. **Domain Registration** - `boring.com` registered via Route53 or external registrar
+1. **Domain Registration** - `boring.tech` registered via Route53 or external registrar
 2. **GitHub Connection** - Initial CodeStar connection activation (one-time)
 3. **IAM User** - `terraform-infra` user with appropriate permissions
 
@@ -279,7 +297,7 @@ The following resources must be created manually (not managed by Terraform):
 
 ```bash
 aws cloudfront list-conflicting-aliases \
-  --alias www.boring.com \
+  --alias www.boring.tech \
   --distribution-id <YOUR_DIST_ID> \
   --profile boring-tech
 ```

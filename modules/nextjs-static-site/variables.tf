@@ -4,7 +4,7 @@ variable "bucket_name" {
 }
 
 variable "domain_name" {
-  description = "Custom domain name (e.g., portal.boring.com)"
+  description = "Custom domain name (e.g., portal.boring.tech)"
   type        = string
   default     = null
 }
