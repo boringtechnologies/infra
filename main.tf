@@ -165,6 +165,18 @@ resource "aws_api_gateway_stage" "prod" {
   deployment_id = aws_api_gateway_deployment.boring_api_deploy.id
 }
 
+# Service-linked role for API Gateway
+# This is required for API Gateway to create custom domain names
+resource "aws_iam_service_linked_role" "apigateway" {
+  aws_service_name = "apigateway.amazonaws.com"
+  description      = "Service-linked role for API Gateway"
+
+  # This role may already exist in the account, so we ignore if it does
+  lifecycle {
+    ignore_changes = [description]
+  }
+}
+
 # API Gateway Custom Domain
 resource "aws_api_gateway_domain_name" "api" {
   domain_name              = "api.boring.tech"
@@ -179,6 +191,9 @@ resource "aws_api_gateway_domain_name" "api" {
     Project   = "boring"
     ManagedBy = "Terraform"
   }
+
+  # Ensure the service-linked role exists before creating the domain
+  depends_on = [aws_iam_service_linked_role.apigateway]
 }
 
 # Base Path Mapping - maps the domain to your API Gateway stage

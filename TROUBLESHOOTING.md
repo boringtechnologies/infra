@@ -1,6 +1,14 @@
-# Fixing Route53 Certificate Validation State Drift
+# Troubleshooting Guide
 
-## Problem
+## Table of Contents
+1. [Route53 Certificate Validation State Drift](#route53-certificate-validation-state-drift)
+2. [API Gateway Service-Linked Role Permissions](#api-gateway-service-linked-role-permissions)
+
+---
+
+## Route53 Certificate Validation State Drift
+
+### Problem
 
 You may encounter this error when running `terraform plan` or `terraform apply`:
 
@@ -84,7 +92,80 @@ If the problem persists:
 3. Consider recreating the entire certificate if validation is stuck
 4. Review recent changes to the Terraform configuration or manual AWS changes
 
-## Reference
+### Reference
 
 - AWS ACM Certificate Validation: https://docs.aws.amazon.com/acm/latest/userguide/dns-validation.html
 - Terraform State Commands: https://www.terraform.io/cli/commands/state
+
+---
+
+## API Gateway Service-Linked Role Permissions
+
+### Problem
+
+You may encounter this error when running `terraform apply`:
+
+```
+Error: creating API Gateway Domain Name (api.boring.tech): operation error API Gateway: CreateDomainName, https response error StatusCode: 403, RequestID: e8485ca4-c083-4328-9949-ad278a0cde2c, api error AccessDeniedException: Caller does not have permissions to create a Service Linked Role.
+
+  with aws_api_gateway_domain_name.api,
+  on main.tf line 169, in resource "aws_api_gateway_domain_name" "api":
+ 169: resource "aws_api_gateway_domain_name" "api" {
+```
+
+### Root Cause
+
+API Gateway requires a service-linked role (`AWSServiceRoleForAPIGateway`) to function properly. When creating an API Gateway custom domain name for the first time in an AWS account, AWS attempts to automatically create this service-linked role. If the IAM user/role executing Terraform doesn't have the `iam:CreateServiceLinkedRole` permission, this operation fails.
+
+### Solution
+
+The infrastructure now includes an explicit `aws_iam_service_linked_role` resource that creates the service-linked role for API Gateway. This ensures:
+
+1. The role is created with proper permissions through Terraform
+2. The API Gateway domain depends on this role being created first
+3. The creation is idempotent (won't fail if the role already exists)
+
+The fix is already implemented in `main.tf`:
+
+```hcl
+resource "aws_iam_service_linked_role" "apigateway" {
+  aws_service_name = "apigateway.amazonaws.com"
+  description      = "Service-linked role for API Gateway"
+
+  lifecycle {
+    ignore_changes = [description]
+  }
+}
+```
+
+### Manual Alternative (If Needed)
+
+If you prefer to create the service-linked role manually or if the automated creation still fails, you can create it using the AWS CLI:
+
+```bash
+aws iam create-service-linked-role --aws-service-name apigateway.amazonaws.com
+```
+
+After creating it manually, import it into Terraform state:
+
+```bash
+terraform import aws_iam_service_linked_role.apigateway arn:aws:iam::ACCOUNT_ID:role/aws-service-role/apigateway.amazonaws.com/AWSServiceRoleForAPIGateway
+```
+
+Replace `ACCOUNT_ID` with your AWS account ID.
+
+### Prevention
+
+The Terraform configuration now automatically manages this service-linked role, so this error should not occur in future deployments. The role will be created during the first `terraform apply` and persist across subsequent runs.
+
+### Important Notes
+
+- This service-linked role is required for all API Gateway custom domain names
+- The role is created once per AWS account, not per region or resource
+- The `ignore_changes` lifecycle policy prevents unnecessary updates
+- If the role already exists in your account, Terraform will adopt it
+
+### Reference
+
+- AWS Service-Linked Roles: https://docs.aws.amazon.com/IAM/latest/UserGuide/using-service-linked-roles.html
+- API Gateway Service-Linked Role: https://docs.aws.amazon.com/apigateway/latest/developerguide/using-service-linked-roles.html
