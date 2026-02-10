@@ -419,7 +419,7 @@ locals {
     }
     medspa-web = {
       domain_name   = "dev.jouvencemedicalspa.com"
-      github_repo   = "boring-dev/portal"
+      github_repo   = "boringtechnologies/medspa-web"
       github_branch = "prod"
       enable_cicd   = true
       basic_auth = {
@@ -428,7 +428,7 @@ locals {
     }
     docs = {
       domain_name   = "docs.boring.tech"
-      github_repo   = "boring-dev/docs"
+      github_repo   = "boringtechnologies/docs"
       github_branch = "prod"
       enable_cicd   = true
       basic_auth = {
