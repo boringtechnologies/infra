@@ -1,9 +1,86 @@
 # Troubleshooting Guide
 
 ## Table of Contents
-1. [GitHub Connector Not Seeing Repository](#github-connector-not-seeing-repository)
-2. [Route53 Certificate Validation State Drift](#route53-certificate-validation-state-drift)
-3. [API Gateway Permissions Issues](#api-gateway-permissions-issues)
+1. [Lambda Layer Dependencies Not Updating](#lambda-layer-dependencies-not-updating)
+2. [GitHub Connector Not Seeing Repository](#github-connector-not-seeing-repository)
+3. [Route53 Certificate Validation State Drift](#route53-certificate-validation-state-drift)
+4. [API Gateway Permissions Issues](#api-gateway-permissions-issues)
+
+---
+
+## Lambda Layer Dependencies Not Updating
+
+### Problem
+
+You added a new Python package to `lambda-layers/common-layer/requirements.txt` or `lambda-layers/stripe-layer/requirements.txt`, ran `terraform apply`, but Lambda functions still can't import the new package:
+
+```
+[ERROR] Runtime.ImportModuleError: Unable to import module 'handler': No module named 'pymongo'
+```
+
+### Root Cause
+
+Lambda layers need to be rebuilt AND a new layer version must be created in AWS for the changes to take effect. Previously, the `aws_lambda_layer_version` resources were missing the `source_code_hash` attribute, which meant Terraform didn't detect when the layer zip file changed.
+
+### Solution
+
+**This issue has been fixed**. The layer resources now include `source_code_hash` which automatically detects changes to the layer zip files.
+
+#### For New Changes (After the Fix)
+
+Simply run `terraform apply` after updating requirements.txt:
+
+```bash
+terraform apply -var-file="secrets.tfvars"
+```
+
+Terraform will:
+1. Detect the change in requirements.txt (via filemd5 trigger)
+2. Rebuild the layer zip file using Docker
+3. Detect the change in the zip file (via source_code_hash)
+4. Create a new layer version in AWS
+5. Update Lambda functions to use the new layer version
+
+#### If You Still Have Issues
+
+1. **Verify Docker is running**:
+   ```bash
+   docker ps
+   ```
+   The layer build script requires Docker to create a Lambda-compatible environment.
+
+2. **Check for layer build errors**:
+   ```bash
+   # Manually build the layer to see detailed output
+   ./scripts/build-lambda-layer.sh common-layer lambda-layers/common-layer/requirements.txt
+   ```
+
+3. **Verify the package is in requirements.txt**:
+   ```bash
+   cat lambda-layers/common-layer/requirements.txt
+   ```
+
+4. **Check layer size** (AWS limit is 250MB uncompressed):
+   ```bash
+   ls -lh lambda-layers/common-layer.zip
+   unzip -l lambda-layers/common-layer.zip | tail -1
+   ```
+
+5. **Verify Lambda runtime matches layer**:
+   - Lambda functions use `python3.13` (default in `modules/lambda-endpoint/variables.tf`)
+   - Lambda layers are built for `python3.13` (in Docker image)
+   - Both must match for imports to work
+
+### Prevention
+
+- Always run `terraform apply` after updating requirements.txt
+- The layer will automatically rebuild and redeploy
+- No manual intervention needed (Docker handles the build)
+
+### Reference
+
+- AWS Lambda Layers: https://docs.aws.amazon.com/lambda/latest/dg/configuration-layers.html
+- Lambda Layer Limits: https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html
 
 ---
 

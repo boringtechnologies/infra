@@ -86,6 +86,10 @@ locals {
       environment = "common"
       layers      = ["common"]
     }
+    "list-users" = {
+      environment = "common"
+      layers      = ["common"]
+    }
     "update-records" = {
       environment = "common"
       layers      = ["common"]
@@ -593,8 +597,9 @@ resource "null_resource" "build_stripe_layer" {
 resource "aws_lambda_layer_version" "stripe" {
   depends_on = [null_resource.build_stripe_layer]
 
-  filename   = "${path.module}/lambda-layers/stripe-layer.zip"
-  layer_name = "boring-stripe-layer"
+  filename         = "${path.module}/lambda-layers/stripe-layer.zip"
+  layer_name       = "boring-stripe-layer"
+  source_code_hash = filebase64sha256("${path.module}/lambda-layers/stripe-layer.zip")
 
   compatible_runtimes = ["python3.13"]
 }
@@ -613,8 +618,9 @@ resource "null_resource" "build_common_layer" {
 resource "aws_lambda_layer_version" "common" {
   depends_on = [null_resource.build_common_layer]
 
-  filename   = "${path.module}/lambda-layers/common-layer.zip"
-  layer_name = "boring-common-layer"
+  filename         = "${path.module}/lambda-layers/common-layer.zip"
+  layer_name       = "boring-common-layer"
+  source_code_hash = filebase64sha256("${path.module}/lambda-layers/common-layer.zip")
 
   compatible_runtimes = ["python3.13"]
 }
