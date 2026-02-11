@@ -426,6 +426,15 @@ locals {
         enabled = false
       }
     }
+    falcon-web = {
+      domain_name   = "dev.falconmdpa.com"
+      github_repo   = "boringtechnologies/falcon-web"
+      github_branch = "prod"
+      enable_cicd   = true
+      basic_auth = {
+        enabled = false
+      }
+    }
     records = {
       domain_name   = "records.boring.tech"
       github_repo   = ""
