@@ -441,9 +441,9 @@ locals {
     }
     records = {
       domain_name   = "records.boring.tech"
-      github_repo   = ""
-      github_branch = ""
-      enable_cicd   = false
+      github_repo   = "boringtechnologies/records-web"
+      github_branch = "dev"
+      enable_cicd   = true
       basic_auth = {
         enabled = false
       }
