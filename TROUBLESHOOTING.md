@@ -24,7 +24,7 @@ Lambda layers need to be rebuilt AND a new layer version must be created in AWS 
 
 ### Solution
 
-**This issue has been fixed** as of commit c3b4694. The layer resources now include `source_code_hash` which automatically detects changes to the layer zip files.
+**This issue has been fixed**. The layer resources now include `source_code_hash` which automatically detects changes to the layer zip files.
 
 #### For New Changes (After the Fix)
 
