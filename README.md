@@ -68,7 +68,7 @@ aws_profile = "boring-tech"
 region      = "us-east-1"
 
 # Cryptlex API
-cryptlex_api_key = "your-cryptlex-api-key"
+mongodb_uri = "your-mongodb-uri"
 account_alias    = "your-account-alias"
 base_url         = "https://api.cryptlex.com/v3"
 

@@ -1,0 +1,93 @@
+import json
+import os
+from pymongo import MongoClient
+
+# MongoDB settings
+DATABASE_NAME = "vinyl_collection"
+USERS_COLLECTION = "users"
+
+def lambda_handler(event, context):
+    """
+    Lambda function to retrieve users from MongoDB.
+    Supports ?user=username parameter to get a specific user.
+    """
+    try:
+        # Get MongoDB URI from environment variable
+        mongodb_uri = os.environ.get("MONGODB_URI")
+        
+        if not mongodb_uri:
+            return {
+                'statusCode': 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'MONGODB_URI environment variable not set'
+                })
+            }
+        
+        # Connect to MongoDB
+        client = MongoClient(mongodb_uri)
+        db = client[DATABASE_NAME]
+        users_collection = db[USERS_COLLECTION]
+        
+        # Get query parameters
+        query_params = event.get('queryStringParameters', {}) or {}
+        
+        # Build MongoDB query
+        query = {}
+        if query_params.get('user'):
+            query['username'] = query_params['user']
+            # Get single user
+            user = users_collection.find_one(query, {'_id': 0})
+            client.close()
+            
+            if user:
+                return {
+                    'statusCode': 200,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    'body': json.dumps({'user': user})
+                }
+            else:
+                return {
+                    'statusCode': 404,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    'body': json.dumps({
+                        'error': f"User '{query_params['user']}' not found"
+                    })
+                }
+        
+        # Get all users if no parameter specified
+        users = list(users_collection.find({}, {'_id': 0}))
+        client.close()
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'users': users,
+                'count': len(users)
+            })
+        }
+    
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'error': str(e)
+            })
+        }

@@ -1,139 +1,137 @@
-import boto3
-import base64
-import os
-import requests
 import json
+import os
+from pymongo import MongoClient
 
-kms_client = boto3.client("kms")
-KEY_ALIAS = "alias/boring-cookie-kms-key"
-
-BASE_URL = "https://api.cryptlex.com/v3"
-CRYPTLEX_API_KEY = os.environ.get("CRYPTLEX_API_KEY")
-ACCOUNT_ALIAS = os.environ.get("ACCOUNT_ALIAS", "boring")
+# MongoDB settings
+DATABASE_NAME = "vinyl_collection"
+RECORDS_COLLECTION = "records"
 
 def lambda_handler(event, context):
-
-    headers = event.get("headers", {})
-
-    print("Headers:", headers)
-
-    cookie_header = headers.get("cookie") or headers.get("Cookie")
-    cookie_token = get_token_from_cookie(cookie_header)
-    print("Incoming cookies token:", cookie_token)
-
-    origin = event.get("headers", {}).get("origin", "")  # Note lowercase in API Gateway
-    allowed_origins = ["https://portal.boring.tech", "https://portal.dev.boring.tech", "http://localhost:3000"]
-    cors_origin = origin if origin in allowed_origins else "null"
-
-    # Preflight OPTIONS request
-    if event["httpMethod"] == "OPTIONS":
-        return {
-            "statusCode": 200,
-            "headers": {
-                "Access-Control-Allow-Origin": cors_origin,
-                "Access-Control-Allow-Credentials": "true",
-                "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
-                "Access-Control-Allow-Headers": "Content-Type,Authorization",
-            },
-            "body": ""
-        }
-
-    validated = validate_cookie(cookie_token)
-    if not validated:
-        return {
-            "statusCode": 401,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": cors_origin,
-                "Access-Control-Allow-Credentials": "true",
-                "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
-                "Access-Control-Allow-Headers": "Content-Type,Authorization"
-            },
-            "body": json.dumps({"errorReason": "invalid_cookie", "errorMessage": "Invalid cookie"})
-        }
-
-    try:
-        body = json.loads(event.get("body") or "{}")
-        organization_description = body.get("organizationName")
-        organization_id = body.get("organizationId")
-
-        organization = update_org_name(organization_description, organization_id)
-
-        if "errorMessage" in organization:
-            body = organization["errorMessage"]
-            status = organization.get("statusCode", 400)
-        else:
-            status = 200
-            body = organization
-
-        return {
-            "statusCode": status,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": cors_origin,
-                "Access-Control-Allow-Credentials": "true",
-                "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
-                "Access-Control-Allow-Headers": "Content-Type,Authorization"
-            },
-            "body": json.dumps(body)
-        }
-
-    except Exception as e:
-        return {
-            "statusCode": 500,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": cors_origin,
-                "Access-Control-Allow-Credentials": "true",
-                "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
-                "Access-Control-Allow-Headers": "Content-Type,Authorization"
-            },
-            "body": str(e)
-        }
-
-def update_org_name(organization_description, organization_id):
-    url = f"{BASE_URL}/organizations/{organization_id}"
-    headers = {
-        "Authorization": f"Bearer {CRYPTLEX_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    print("updating organization with description:", organization_description)
-    payload = {
-        "description": organization_description
-    }
-    resp = requests.patch(url, json=payload, headers=headers)
-
-    if resp.status_code == 400:
-        return {
-            "errorMessage": "Error editing organization",
-            "statusCode": 400
-        }
-
-    print("Response from update organization:", resp.status_code, resp.text)
-    resp.raise_for_status()
-    return resp.json()
-
-def get_token_from_cookie(cookie_header):
-    if not cookie_header:
-        return None
-    cookies = cookie_header.split(";")
-    for cookie in cookies:
-        cookie = cookie.strip()
-        if cookie.startswith("token="):
-            return cookie[len("token="):]
-    return None
-
-def validate_cookie(encrypted_cookie):
     """
-    Decrypts the encrypted cookie and checks if userRole is 'organization-admin'.
-    Returns True if valid, False otherwise.
+    Lambda function to update vinyl records in MongoDB via POST.
+    Requires catalog_number to identify the record.
+    Updates any fields provided in the request body.
+    Supports user-specific fields: {user_id}_like, {user_id}_dislike, {user_id}_favorite
     """
     try:
-        ciphertext_blob = base64.b64decode(encrypted_cookie)
-        resp = kms_client.decrypt(CiphertextBlob=ciphertext_blob)
-        plaintext = resp["Plaintext"]
-        payload = json.loads(plaintext)
-        return payload.get("userRole") == "organization-admin"
+        # Get MongoDB URI from environment variable
+        mongodb_uri = os.environ.get("MONGODB_URI")
+        
+        if not mongodb_uri:
+            return {
+                'statusCode': 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'MONGODB_URI environment variable not set'
+                })
+            }
+        
+        # Parse request body
+        try:
+            body = json.loads(event.get('body', '{}'))
+        except json.JSONDecodeError:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'Invalid JSON in request body'
+                })
+            }
+        
+        # Validate that catalog_number is provided
+        if 'catalog_number' not in body:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'catalog_number is required to identify the record'
+                })
+            }
+        
+        catalog_number = body.pop('catalog_number')
+        
+        # Check if there are fields to update
+        if not body:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': 'No fields provided to update'
+                })
+            }
+        
+        # Convert string booleans to actual booleans for user-specific fields
+        for key in list(body.keys()):
+            # Handle {user_id}_like, {user_id}_dislike, {user_id}_favorite
+            if key.endswith('_like') or key.endswith('_dislike') or key.endswith('_favorite'):
+                value = body[key]
+                if isinstance(value, str):
+                    if value.lower() == 'true':
+                        body[key] = True
+                    elif value.lower() == 'false':
+                        body[key] = False
+                    # Otherwise keep as-is if it's already a boolean
+        
+        # Connect to MongoDB
+        client = MongoClient(mongodb_uri)
+        db = client[DATABASE_NAME]
+        records_collection = db[RECORDS_COLLECTION]
+        
+        # Update the record
+        result = records_collection.update_one(
+            {'catalog_number': catalog_number},
+            {'$set': body}
+        )
+        
+        client.close()
+        
+        # Check if record was found and updated
+        if result.matched_count == 0:
+            return {
+                'statusCode': 404,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'error': f"Record with catalog_number '{catalog_number}' not found"
+                })
+            }
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'message': 'Record updated successfully',
+                'catalog_number': catalog_number,
+                'modified_count': result.modified_count,
+                'updated_fields': list(body.keys())
+            })
+        }
+    
     except Exception as e:
-        print(f"Cookie validation failed: {e}")
-        return False
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'error': str(e)
+            })
+        }

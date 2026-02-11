@@ -8,7 +8,7 @@ variable "aws_profile" {
   default     = "default"
 }
 
-variable "cryptlex_api_key" {
+variable "mongodb_uri" {
   type      = string
   sensitive = true
 }

@@ -101,7 +101,7 @@ locals {
   # Environment variable sets
   env_vars_common = {
     ACCOUNT_ALIAS    = var.account_alias
-    CRYPTLEX_API_KEY = var.cryptlex_api_key
+    MONGODB_URI = var.mongodb_uri
     BASE_URL         = var.base_url
   }
 
@@ -400,7 +400,7 @@ locals {
       }
     }
     psych-web = {
-      domain_name   = "dev.boringpsych.com"
+      domain_name   = "boringpsych.com"
       github_repo   = "boringtechnologies/psych-web"
       github_branch = "prod"
       enable_cicd   = true
@@ -409,7 +409,7 @@ locals {
       }
     }
     bca-web = {
-      domain_name   = "dev.boringmd.org"
+      domain_name   = "boringmd.org"
       github_repo   = "boringtechnologies/bca-web"
       github_branch = "prod"
       enable_cicd   = true
