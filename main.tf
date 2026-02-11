@@ -86,6 +86,10 @@ locals {
       environment = "common"
       layers      = ["common"]
     }
+    "list-users" = {
+      environment = "common"
+      layers      = ["common"]
+    }
     "update-records" = {
       environment = "common"
       layers      = ["common"]
