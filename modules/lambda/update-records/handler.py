@@ -14,7 +14,7 @@ def lambda_handler(event, context):
     Supports user-specific fields: {user_id}_like, {user_id}_dislike, {user_id}_favorite
     """
     
-    origin = event.get("headers", {}).get("origin", "")  # Note lowercase in API Gateway
+    origin = event.get("headers", {}).get("origin", "")
     allowed_origins = ["https://records.boring.tech", "http://localhost:3000"]
     cors_origin = origin if origin in allowed_origins else "null"
 
@@ -41,7 +41,8 @@ def lambda_handler(event, context):
                 'statusCode': 500,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': cors_origin,
+                    'Access-Control-Allow-Credentials': 'true'
                 },
                 'body': json.dumps({
                     'error': 'MONGODB_URI environment variable not set'
@@ -56,7 +57,8 @@ def lambda_handler(event, context):
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': cors_origin,
+                    'Access-Control-Allow-Credentials': 'true'
                 },
                 'body': json.dumps({
                     'error': 'Invalid JSON in request body'
@@ -69,7 +71,8 @@ def lambda_handler(event, context):
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': cors_origin,
+                    'Access-Control-Allow-Credentials': 'true'
                 },
                 'body': json.dumps({
                     'error': 'catalog_number is required to identify the record'
@@ -84,7 +87,8 @@ def lambda_handler(event, context):
                 'statusCode': 400,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': cors_origin,
+                    'Access-Control-Allow-Credentials': 'true'
                 },
                 'body': json.dumps({
                     'error': 'No fields provided to update'
@@ -122,7 +126,8 @@ def lambda_handler(event, context):
                 'statusCode': 404,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': cors_origin,
+                    'Access-Control-Allow-Credentials': 'true'
                 },
                 'body': json.dumps({
                     'error': f"Record with catalog_number '{catalog_number}' not found"
@@ -133,7 +138,8 @@ def lambda_handler(event, context):
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': cors_origin,
+                'Access-Control-Allow-Credentials': 'true'
             },
             'body': json.dumps({
                 'message': 'Record updated successfully',
@@ -148,7 +154,8 @@ def lambda_handler(event, context):
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': cors_origin,
+                'Access-Control-Allow-Credentials': 'true'
             },
             'body': json.dumps({
                 'error': str(e)

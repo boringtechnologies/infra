@@ -13,7 +13,7 @@ def lambda_handler(event, context):
     Supports ?record=<catalog_number> parameter to get a specific record.
     """
     
-    origin = event.get("headers", {}).get("origin", "")  # Note lowercase in API Gateway
+    origin = event.get("headers", {}).get("origin", "")
     allowed_origins = ["https://records.boring.tech", "http://localhost:3000"]
     cors_origin = origin if origin in allowed_origins else "null"
 
@@ -40,7 +40,7 @@ def lambda_handler(event, context):
                 'statusCode': 500,
                 'headers': {
                     'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
+                    'Access-Control-Allow-Origin': cors_origin
                 },
                 'body': json.dumps({
                     'error': 'MONGODB_URI environment variable not set'
@@ -66,11 +66,16 @@ def lambda_handler(event, context):
             client.close()
             
             if record:
+                # Convert ObjectId to string
+                record['id'] = str(record['_id'])
+                del record['_id']
+                
                 return {
                     'statusCode': 200,
                     'headers': {
                         'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*'
+                        'Access-Control-Allow-Origin': cors_origin,
+                        'Access-Control-Allow-Credentials': 'true'
                     },
                     'body': json.dumps({'record': record})
                 }
@@ -79,7 +84,8 @@ def lambda_handler(event, context):
                     'statusCode': 404,
                     'headers': {
                         'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*'
+                        'Access-Control-Allow-Origin': cors_origin,
+                        'Access-Control-Allow-Credentials': 'true'
                     },
                     'body': json.dumps({
                         'error': f"Record '{query_params['record']}' not found"
@@ -93,14 +99,21 @@ def lambda_handler(event, context):
             query['needs_review'] = query_params['needs_review']
         
         # Retrieve all records matching query
-        records = list(records_collection.find(query, {'_id': 0}))
+        records_cursor = records_collection.find(query)
+        records = []
+        for record in records_cursor:
+            # Convert ObjectId to string
+            record['id'] = str(record['_id'])
+            del record['_id']
+            records.append(record)
         client.close()
         
         return {
             'statusCode': 200,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': cors_origin,
+                'Access-Control-Allow-Credentials': 'true'
             },
             'body': json.dumps({
                 'records': records,
@@ -113,7 +126,8 @@ def lambda_handler(event, context):
             'statusCode': 500,
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': cors_origin,
+                'Access-Control-Allow-Credentials': 'true'
             },
             'body': json.dumps({
                 'error': str(e)
