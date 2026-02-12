@@ -123,9 +123,9 @@ def lambda_handler(event, context):
         if query_params.get("title"):
             query["title"] = {"$regex": query_params["title"], "$options": "i"}
 
-        # note: your param name here is spelled "catelog_number" to match your request
-        if query_params.get("catelog_number"):
-            query["catalog_number"] = {"$regex": query_params["catelog_number"], "$options": "i"}
+        # note: your param name here is spelled "catalog_number" to match your request
+        if query_params.get("catalog_number"):
+            query["catalog_number"] = {"$regex": query_params["catalog_number"], "$options": "i"}
 
         if query_params.get("needs_review") is not None:
             # If your DB stores needs_review as boolean, consider normalizing this:
