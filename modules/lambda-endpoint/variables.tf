@@ -48,3 +48,9 @@ variable "execution_arn" {
 variable "region" {
   type = string
 }
+
+variable "timeout" {
+  type    = number
+  default = 900
+  description = "Lambda function timeout in seconds (max 900 = 15 minutes)"
+}
