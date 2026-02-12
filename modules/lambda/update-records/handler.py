@@ -13,6 +13,24 @@ def lambda_handler(event, context):
     Updates any fields provided in the request body.
     Supports user-specific fields: {user_id}_like, {user_id}_dislike, {user_id}_favorite
     """
+    
+    origin = event.get("headers", {}).get("origin", "")  # Note lowercase in API Gateway
+    allowed_origins = ["https://theskillplace.com", "http://localhost:3000"]
+    cors_origin = origin if origin in allowed_origins else "null"
+
+    # Preflight OPTIONS request
+    if event["httpMethod"] == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Access-Control-Allow-Origin": cors_origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
+                "Access-Control-Allow-Headers": "Content-Type,Authorization",
+            },
+            "body": ""
+        }
+    
     try:
         # Get MongoDB URI from environment variable
         mongodb_uri = os.environ.get("MONGODB_URI")

@@ -12,6 +12,24 @@ def lambda_handler(event, context):
     Lambda function to retrieve vinyl records from MongoDB.
     Supports ?record=<catalog_number> parameter to get a specific record.
     """
+    
+    origin = event.get("headers", {}).get("origin", "")  # Note lowercase in API Gateway
+    allowed_origins = ["https://theskillplace.com", "http://localhost:3000"]
+    cors_origin = origin if origin in allowed_origins else "null"
+
+    # Preflight OPTIONS request
+    if event["httpMethod"] == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Access-Control-Allow-Origin": cors_origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
+                "Access-Control-Allow-Headers": "Content-Type,Authorization",
+            },
+            "body": ""
+        }
+    
     try:
         # Get MongoDB URI from environment variable
         mongodb_uri = os.environ.get("MONGODB_URI")
