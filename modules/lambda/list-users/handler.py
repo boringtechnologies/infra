@@ -14,7 +14,7 @@ def lambda_handler(event, context):
     """
     
     origin = event.get("headers", {}).get("origin", "")
-    allowed_origins = ["https://theskillplace.com", "http://localhost:3000"]
+    allowed_origins = ["https://records.boring.tech", "http://localhost:3000"]
     cors_origin = origin if origin in allowed_origins else "null"
 
     # Preflight OPTIONS request
