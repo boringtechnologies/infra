@@ -1,15 +1,18 @@
 import json
 import os
 from pymongo import MongoClient
+from bson.objectid import ObjectId
+
 
 # MongoDB settings
 DATABASE_NAME = "vinyl_collection"
 RECORDS_COLLECTION = "records"
 
+
 def lambda_handler(event, context):
     """
     Lambda function to update vinyl records in MongoDB via POST.
-    Requires catalog_number to identify the record.
+    Requires _id to identify the record.
     Updates any fields provided in the request body.
     Supports user-specific fields: {user_id}_like, {user_id}_dislike, {user_id}_favorite
     """
@@ -17,6 +20,7 @@ def lambda_handler(event, context):
     origin = event.get("headers", {}).get("origin", "")
     allowed_origins = ["https://records.boring.tech", "http://localhost:3000"]
     cors_origin = origin if origin in allowed_origins else "null"
+
 
     # Preflight OPTIONS request
     http_method = event.get("httpMethod", "")
@@ -65,8 +69,8 @@ def lambda_handler(event, context):
                 })
             }
         
-        # Validate that catalog_number is provided
-        if 'catalog_number' not in body:
+        # Validate that _id is provided
+        if '_id' not in body:
             return {
                 'statusCode': 400,
                 'headers': {
@@ -75,11 +79,27 @@ def lambda_handler(event, context):
                     'Access-Control-Allow-Credentials': 'true'
                 },
                 'body': json.dumps({
-                    'error': 'catalog_number is required to identify the record'
+                    'error': '_id is required to identify the record'
                 })
             }
         
-        catalog_number = body.pop('catalog_number')
+        record_id = body.pop('_id')
+        
+        # Validate and convert _id to ObjectId
+        try:
+            object_id = ObjectId(record_id)
+        except Exception:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': cors_origin,
+                    'Access-Control-Allow-Credentials': 'true'
+                },
+                'body': json.dumps({
+                    'error': 'Invalid _id format'
+                })
+            }
         
         # Check if there are fields to update
         if not body:
@@ -114,7 +134,7 @@ def lambda_handler(event, context):
         
         # Update the record
         result = records_collection.update_one(
-            {'catalog_number': catalog_number},
+            {'_id': object_id},
             {'$set': body}
         )
         
@@ -130,7 +150,7 @@ def lambda_handler(event, context):
                     'Access-Control-Allow-Credentials': 'true'
                 },
                 'body': json.dumps({
-                    'error': f"Record with catalog_number '{catalog_number}' not found"
+                    'error': f"Record with _id '{record_id}' not found"
                 })
             }
         
@@ -143,7 +163,7 @@ def lambda_handler(event, context):
             },
             'body': json.dumps({
                 'message': 'Record updated successfully',
-                'catalog_number': catalog_number,
+                '_id': record_id,
                 'modified_count': result.modified_count,
                 'updated_fields': list(body.keys())
             })
