@@ -14,11 +14,12 @@ def lambda_handler(event, context):
     """
     
     origin = event.get("headers", {}).get("origin", "")  # Note lowercase in API Gateway
-    allowed_origins = ["https://theskillplace.com", "http://localhost:3000"]
+    allowed_origins = ["https://records.boring.tech", "http://localhost:3000"]
     cors_origin = origin if origin in allowed_origins else "null"
 
     # Preflight OPTIONS request
-    if event["httpMethod"] == "OPTIONS":
+    http_method = event.get("httpMethod", "")
+    if http_method == "OPTIONS":
         return {
             "statusCode": 200,
             "headers": {
@@ -61,7 +62,7 @@ def lambda_handler(event, context):
         if query_params.get('record'):
             query['catalog_number'] = query_params['record']
             # Get single record
-            record = records_collection.find_one(query, {'_id': 0})
+            record = records_collection.find_one(query)
             client.close()
             
             if record:
