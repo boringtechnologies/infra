@@ -431,7 +431,7 @@ locals {
       }
     }
     falcon-web = {
-      domain_name   = "dev.falconmdpa.com"
+      domain_name   = "falconmdpa.com"
       github_repo   = "boringtechnologies/falcon-web"
       github_branch = "prod"
       enable_cicd   = true
