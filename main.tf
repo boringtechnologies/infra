@@ -422,7 +422,7 @@ locals {
       }
     }
     medspa-web = {
-      domain_name   = "dev.jouvencemedicalspa.com"
+      domain_name   = "jouvencemedicalspa.com"
       github_repo   = "boringtechnologies/medspa-web"
       github_branch = "prod"
       enable_cicd   = true
