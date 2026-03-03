@@ -430,7 +430,7 @@ locals {
         enabled = false
       }
     }
-    medspa-web = {
+    dev-medspa-web = {
       domain_name   = "dev.jouvencemedicalspa.com"
       github_repo   = "boringtechnologies/medspa-web"
       github_branch = "dev"
