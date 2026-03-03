@@ -430,6 +430,15 @@ locals {
         enabled = false
       }
     }
+    medspa-web = {
+      domain_name   = "dev.jouvencemedicalspa.com"
+      github_repo   = "boringtechnologies/medspa-web"
+      github_branch = "dev"
+      enable_cicd   = true
+      basic_auth = {
+        enabled = false
+      }
+    }
     falcon-web = {
       domain_name   = "falconmdpa.com"
       github_repo   = "boringtechnologies/falcon-web"
