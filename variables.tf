@@ -60,3 +60,15 @@ variable "dev_basic_auth_password" {
   type        = string
   sensitive   = true
 }
+
+variable "jwt_secret" {
+  description = "JWT signing secret for Falcon API authentication"
+  type        = string
+  sensitive   = true
+}
+
+variable "falcon_db_name" {
+  description = "MongoDB database name for Falcon API"
+  type        = string
+  default     = "falconmdpa"
+}
