@@ -394,6 +394,15 @@ resource "aws_acm_certificate_validation" "domain_certs" {
 # Define all your NextJS sites with pipeline config
 locals {
   nextjs_sites = {
+    wow-web = {
+      domain_name   = "wowchicago.boring.tech"
+      github_repo   = "boringtechnologies/wow-web"
+      github_branch = "dev"
+      enable_cicd   = true
+      basic_auth = {
+        enabled = false
+      }
+    }
     boring-web = {
       domain_name   = "boring.tech"
       github_repo   = "boringtechnologies/boring-web"
