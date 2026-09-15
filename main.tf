@@ -96,6 +96,22 @@ locals {
     }
   }
 
+  # Falcon API lambda configurations
+  falcon_lambda_configs = {
+    "falcon-user" = {
+      path_part = "user"
+      layers    = ["common"]
+    }
+    "falcon-banner" = {
+      path_part = "banner"
+      layers    = ["common"]
+    }
+    "falcon-property" = {
+      path_part = "property"
+      layers    = ["common"]
+    }
+  }
+
   # Map layer names to ARNs
   layer_arns = {
     "stripe" = aws_lambda_layer_version.stripe.arn
@@ -122,6 +138,14 @@ locals {
     PRICE_CENTS            = tostring(var.stripe_price_cents)
     PRODUCT_ID             = var.stripe_product_id
   })
+
+  # Falcon API environment variables
+  env_vars_falcon = {
+    MONGODB_URI    = var.mongodb_uri
+    JWT_SECRET     = var.jwt_secret
+    FALCON_DB_NAME = var.falcon_db_name
+    UPLOADS_BUCKET = aws_s3_bucket.falcon_uploads.bucket
+  }
 }
 
 module "lambdas" {
@@ -151,9 +175,71 @@ module "lambdas" {
   )
 }
 
+# Falcon API Lambda functions (user, banner, property)
+module "falcon_lambdas" {
+  source   = "./modules/falcon-lambda-endpoint"
+  for_each = local.falcon_lambda_configs
+
+  lambda_name     = "boring-${each.key}"
+  lambda_zip_path = "./modules/lambda/${each.key}/lambda.zip"
+  role_arn        = module.iam.lambda_exec_role_arn
+  region          = var.region
+  path_part       = each.value.path_part
+
+  rest_api_id        = module.api_gateway.rest_api_id
+  parent_resource_id = module.api_gateway.root_resource_id
+  execution_arn      = module.api_gateway.execution_arn
+
+  layers = [
+    for layer_name in each.value.layers : local.layer_arns[layer_name]
+  ]
+
+  environment_variables = local.env_vars_falcon
+}
+
+# S3 bucket for Falcon API file uploads
+resource "aws_s3_bucket" "falcon_uploads" {
+  bucket = "boring-falcon-uploads"
+
+  tags = {
+    Name      = "Falcon API Uploads"
+    Project   = "boring"
+    ManagedBy = "Terraform"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "falcon_uploads" {
+  bucket = aws_s3_bucket.falcon_uploads.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# IAM policy to allow Lambda to read/write falcon uploads bucket
+resource "aws_iam_policy" "falcon_s3_uploads" {
+  name        = "boring_falcon_s3_uploads_policy"
+  description = "Allow Lambda to read and write Falcon API uploads bucket"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"]
+      Resource = "${aws_s3_bucket.falcon_uploads.arn}/uploads/*"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "falcon_s3_uploads" {
+  role       = module.iam.lambda_exec_role_name
+  policy_arn = aws_iam_policy.falcon_s3_uploads.arn
+}
+
 # API Gateway Deployment
 resource "aws_api_gateway_deployment" "boring_api_deploy" {
-  depends_on = [module.lambdas]
+  depends_on = [module.lambdas, module.falcon_lambdas]
 
   rest_api_id = module.api_gateway.rest_api_id
 
@@ -205,9 +291,50 @@ resource "aws_route53_record" "api" {
   }
 }
 
+# API Gateway Custom Domain for Falcon API
+resource "aws_api_gateway_domain_name" "falcon_api" {
+  domain_name              = "api.falconmdpa.com"
+  regional_certificate_arn = aws_acm_certificate_validation.domain_certs["falconmdpa.com"].certificate_arn
+
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
+
+  tags = {
+    Name      = "Falcon API Domain"
+    Project   = "boring"
+    ManagedBy = "Terraform"
+  }
+}
+
+# Base Path Mapping for Falcon API domain
+resource "aws_api_gateway_base_path_mapping" "falcon_api" {
+  api_id      = module.api_gateway.rest_api_id
+  stage_name  = aws_api_gateway_stage.prod.stage_name
+  domain_name = aws_api_gateway_domain_name.falcon_api.domain_name
+}
+
+# Route53 A Record for api.falconmdpa.com
+resource "aws_route53_record" "falcon_api" {
+  zone_id = data.aws_route53_zone.falconmdpa.zone_id
+  name    = "api.falconmdpa.com"
+  type    = "A"
+
+  alias {
+    name                   = aws_api_gateway_domain_name.falcon_api.regional_domain_name
+    zone_id                = aws_api_gateway_domain_name.falcon_api.regional_zone_id
+    evaluate_target_health = false
+  }
+}
+
 # Output the custom domain URL
 output "api_custom_domain" {
   value = "https://${aws_api_gateway_domain_name.api.domain_name}"
+}
+
+# Output the Falcon API custom domain URL
+output "falcon_api_custom_domain" {
+  value = "https://${aws_api_gateway_domain_name.falcon_api.domain_name}"
 }
 
 # This automatically creates outputs for ALL lambdas
