@@ -16,9 +16,12 @@
 
 .. seealso:: This module is compatible with both the synchronous and asynchronous PyMongo APIs.
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Mapping, Optional, TypedDict
+import warnings
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Callable, Optional, TypedDict
 
 from pymongo.uri_parser_shared import _parse_kms_tls_options
 
@@ -32,6 +35,13 @@ try:
 except ImportError:
     _HAVE_PYMONGOCRYPT = False
 from bson import int64
+from pymongo._kms_connect_shared import (  # noqa: F401
+    AsyncHTTPProxyKMSConnect,
+    AsyncKMSConnectCallback,
+    HTTPProxyKMSConnect,
+    KMSConnectCallback,
+    KMSConnectContext,
+)
 from pymongo.common import check_for_min_version, validate_is_mapping
 from pymongo.errors import ConfigurationError
 
@@ -72,16 +82,17 @@ class AutoEncryptionOpts:
         bypass_query_analysis: bool = False,
         encrypted_fields_map: Optional[Mapping[str, Any]] = None,
         key_expiration_ms: Optional[int] = None,
+        kms_connect_callback: Optional[Callable[[KMSConnectContext], Any]] = None,
     ) -> None:
         """Options to configure automatic client-side field level encryption.
 
-        Automatic client-side field level encryption requires MongoDB >=4.2
-        enterprise or a MongoDB >=4.2 Atlas cluster. Automatic encryption is not
+        Automatic client-side field level encryption requires MongoDB
+        enterprise or a MongoDB Atlas cluster. Automatic encryption is not
         supported for operations on a database or view and will result in
         error.
 
-        Although automatic encryption requires MongoDB >=4.2 enterprise or a
-        MongoDB >=4.2 Atlas cluster, automatic *decryption* is supported for all
+        Although automatic encryption requires MongoDB enterprise or a
+        MongoDB Atlas cluster, automatic *decryption* is supported for all
         users. To configure automatic *decryption* without automatic
         *encryption* set ``bypass_auto_encryption=True``. Explicit
         encryption and explicit decryption is also supported for all users
@@ -209,7 +220,18 @@ class AutoEncryptionOpts:
         :param key_expiration_ms: The cache expiration time for data encryption keys.
             Defaults to ``None`` which defers to libmongocrypt's default which is currently 60000.
             Set to 0 to disable key expiration.
+        :param kms_connect_callback: A callable that opens the connection to a
+            KMS host, used to route KMS requests through an HTTP proxy. It
+            receives a :class:`KMSConnectContext` and returns a connected,
+            unwrapped :class:`socket.socket`, over which the driver performs
+            the KMS TLS handshake. Must be a coroutine function for
+            :class:`~pymongo.asynchronous.mongo_client.AsyncMongoClient` and a
+            regular function for
+            :class:`~pymongo.synchronous.mongo_client.MongoClient`. Defaults
+            to ``None``, meaning the driver connects to KMS hosts directly.
 
+        .. versionchanged:: 4.19
+           Added the `kms_connect_callback` parameter.
         .. versionchanged:: 4.12
            Added the `key_expiration_ms` parameter.
         .. versionchanged:: 4.2
@@ -256,6 +278,11 @@ class AutoEncryptionOpts:
         self._async_kms_ssl_contexts: Optional[dict[str, SSLContext]] = None
         self._bypass_query_analysis = bypass_query_analysis
         self._key_expiration_ms = key_expiration_ms
+        if kms_connect_callback is not None and not callable(kms_connect_callback):
+            raise TypeError(
+                f"kms_connect_callback must be callable, not {type(kms_connect_callback)}"
+            )
+        self._kms_connect_callback = kms_connect_callback
 
     def _kms_ssl_contexts(self, is_sync: bool) -> dict[str, SSLContext]:
         if is_sync:
@@ -310,10 +337,8 @@ class RangeOpts:
         return doc
 
 
-class TextOpts:
-    """**BETA** Options to configure encrypted queries using the text algorithm.
-
-    TextOpts is currently unstable API and subject to backwards breaking changes."""
+class StringOpts:
+    """Options to configure encrypted queries using the string algorithm."""
 
     def __init__(
         self,
@@ -323,15 +348,16 @@ class TextOpts:
         case_sensitive: Optional[bool] = None,
         diacritic_sensitive: Optional[bool] = None,
     ) -> None:
-        """Options to configure encrypted queries using the text algorithm.
+        """Options to configure encrypted queries using the string algorithm.
 
         :param substring: Further options to support substring queries.
         :param prefix: Further options to support prefix queries.
         :param suffix: Further options to support suffix queries.
-        :param case_sensitive: Whether text indexes for this field are case sensitive.
-        :param diacritic_sensitive: Whether text indexes for this field are diacritic sensitive.
+        :param case_sensitive: Whether string indexes for this field are case sensitive.
+        :param diacritic_sensitive: Whether string indexes for this field are diacritic sensitive.
 
-        .. versionadded:: 4.15
+        .. versionadded:: 4.18
+           ``StringOpts`` replaces ``TextOpts``, which is deprecated.
         """
         self.substring = substring
         self.prefix = prefix
@@ -355,9 +381,9 @@ class TextOpts:
 
 
 class SubstringOpts(TypedDict):
-    """**BETA** Options for substring text queries.
+    """Options for substring string queries.
 
-    SubstringOpts is currently unstable API and subject to backwards breaking changes.
+    .. versionadded:: 4.15
     """
 
     # strMaxLength is the maximum allowed length to insert. Inserting longer strings will error.
@@ -369,9 +395,9 @@ class SubstringOpts(TypedDict):
 
 
 class PrefixOpts(TypedDict):
-    """**BETA** Options for prefix text queries.
+    """Options for prefix string queries.
 
-    PrefixOpts is currently unstable API and subject to backwards breaking changes.
+    .. versionadded:: 4.15
     """
 
     # strMinQueryLength is the minimum allowed query length. Querying with a shorter string will error.
@@ -381,12 +407,38 @@ class PrefixOpts(TypedDict):
 
 
 class SuffixOpts(TypedDict):
-    """**BETA** Options for suffix text queries.
+    """Options for suffix string queries.
 
-    SuffixOpts is currently unstable API and subject to backwards breaking changes.
+    .. versionadded:: 4.15
     """
 
     # strMinQueryLength is the minimum allowed query length. Querying with a shorter string will error.
     strMinQueryLength: int
     # strMaxQueryLength is the maximum allowed query length. Querying with a longer string will error.
     strMaxQueryLength: int
+
+
+class TextOpts(StringOpts):
+    """**DEPRECATED** Options to configure encrypted queries using the text algorithm.
+
+    .. note:: ``TextOpts`` is deprecated. Use :class:`StringOpts` instead.
+       ``TextOpts`` corresponds to the ``text_opts`` parameter of
+       :meth:`~pymongo.encryption.ClientEncryption.encrypt`, which pymongocrypt
+       added in 1.16 and renamed to ``string_opts`` in 1.19. Passing
+       ``TextOpts`` as ``text_opts`` therefore only works with pymongocrypt
+       1.16 through 1.18; with pymongocrypt 1.19 or later, pass
+       :class:`StringOpts` as ``string_opts``.
+
+    .. versionadded:: 4.15
+
+    .. versionchanged:: 4.18
+       Deprecated in favor of :class:`StringOpts`.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        warnings.warn(
+            "TextOpts is deprecated. Use StringOpts instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)

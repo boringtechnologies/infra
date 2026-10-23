@@ -14,10 +14,10 @@
 
 
 """Tools to parse and validate a MongoDB URI."""
+
 from __future__ import annotations
 
-from typing import Any, Optional
-from urllib.parse import unquote_plus
+from typing import Any, Callable, Optional
 
 from pymongo.asynchronous.srv_resolver import _SrvResolver
 from pymongo.common import SRV_SERVICE_NAME, _CaseInsensitiveDictionary
@@ -47,6 +47,8 @@ async def parse_uri(
     connect_timeout: Optional[float] = None,
     srv_service_name: Optional[str] = None,
     srv_max_hosts: Optional[int] = None,
+    srv_allowed_hosts_suffix: Optional[str] = None,
+    srv_host_validator: Optional[Callable[[str], bool]] = None,
 ) -> dict[str, Any]:
     """Parse and validate a MongoDB URI.
 
@@ -115,6 +117,8 @@ async def parse_uri(
             connect_timeout,
             srv_service_name,
             srv_max_hosts,
+            srv_allowed_hosts_suffix,
+            srv_host_validator,
         )
     )
     result["options"] = _make_options_case_sensitive(result["options"])
@@ -130,6 +134,8 @@ async def _parse_srv(
     connect_timeout: Optional[float] = None,
     srv_service_name: Optional[str] = None,
     srv_max_hosts: Optional[int] = None,
+    srv_allowed_hosts_suffix: Optional[str] = None,
+    srv_host_validator: Optional[Callable[[str], bool]] = None,
 ) -> dict[str, Any]:
     if uri.startswith(SCHEME):
         is_srv = False
@@ -155,16 +161,23 @@ async def _parse_srv(
     else:
         hosts = host_part
 
-    hosts = unquote_plus(hosts)
     srv_max_hosts = srv_max_hosts or options.get("srvMaxHosts")
+    srv_allowed_hosts_suffix = srv_allowed_hosts_suffix or options.get("srvAllowedHostsSuffix")
     if is_srv:
         nodes = split_hosts(hosts, default_port=None)
-        fqdn, port = nodes[0]
+        fqdn, _port = nodes[0]
 
         # Use the connection timeout. connectTimeoutMS passed as a keyword
         # argument overrides the same option passed in the connection string.
         connect_timeout = connect_timeout or options.get("connectTimeoutMS")
-        dns_resolver = _SrvResolver(fqdn, connect_timeout, srv_service_name, srv_max_hosts)
+        dns_resolver = _SrvResolver(
+            fqdn,
+            connect_timeout,
+            srv_service_name,
+            srv_max_hosts,
+            srv_allowed_hosts_suffix,
+            srv_host_validator,
+        )
         nodes = await dns_resolver.get_hosts()
         dns_options = await dns_resolver.get_options()
         if dns_options:

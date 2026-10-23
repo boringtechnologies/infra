@@ -94,6 +94,7 @@ from botocore.plugin import (
     reset_plugin_context,
     set_plugin_context,
 )
+from botocore.useragent import register_feature_id
 
 logger = logging.getLogger(__name__)
 DEFAULT_METADATA_SERVICE_TIMEOUT = 1
@@ -1842,6 +1843,8 @@ class S3RegionRedirectorv2:
             bucket,
             new_region,
         )
+        register_feature_id('S3_REGION_REDIRECT')
+
         # Adding the new region to _cache will make construct_endpoint() to
         # use the new region as value for the AWS::Region builtin parameter.
         self._cache[bucket] = new_region
@@ -1887,21 +1890,19 @@ class S3RegionRedirectorv2:
         service_response = response[1]
         response_headers = service_response['ResponseMetadata']['HTTPHeaders']
         if 'x-amz-bucket-region' in response_headers:
-            return response_headers['x-amz-bucket-region']
-
+            region = response_headers['x-amz-bucket-region']
         # Next, check the error body
-        region = service_response.get('Error', {}).get('Region', None)
-        if region is not None:
-            return region
-
-        # Finally, HEAD the bucket. No other choice sadly.
-        try:
-            response = self._client.head_bucket(Bucket=bucket)
-            headers = response['ResponseMetadata']['HTTPHeaders']
-        except ClientError as e:
-            headers = e.response['ResponseMetadata']['HTTPHeaders']
-
-        region = headers.get('x-amz-bucket-region', None)
+        elif r := service_response.get('Error', {}).get('Region', None):
+            region = r
+        else:
+            # Finally, HEAD the bucket. No other choice sadly.
+            try:
+                response = self._client.head_bucket(Bucket=bucket)
+                headers = response['ResponseMetadata']['HTTPHeaders']
+            except ClientError as e:
+                headers = e.response['ResponseMetadata']['HTTPHeaders']
+            region = headers.get('x-amz-bucket-region', None)
+        validate_region_name(region)
         return region
 
     def set_request_url(self, old_url, new_endpoint, **kwargs):
@@ -1923,6 +1924,7 @@ class S3RegionRedirectorv2:
         if bucket is not None and bucket in self._cache:
             new_region = self._cache.get(bucket)
             builtins['AWS::Region'] = new_region
+            register_feature_id('S3_REGION_REDIRECT')
 
     def annotate_request_context(self, params, context, **kwargs):
         """Store the bucket name in context for later use when redirecting.
@@ -3301,6 +3303,26 @@ def _is_s3express_request(params):
     return endpoint_properties.get('backend') == 'S3Express'
 
 
+def get_checksum_algorithm_headers(params):
+    """
+    Returns the a list of header names from the request which start with
+    "x-amz-checksum-", otherwise returns an empty list.
+
+    This function is considered private and subject to abrupt breaking changes or
+    removal without prior announcement. Please do not use it directly.
+    """
+    headers = params['headers']
+    checksum_headers = []
+
+    # If a header matching the x-amz-checksum-* pattern is present, we
+    # extract and return the algorithm name.
+    for header in headers:
+        match = CHECKSUM_HEADER_PATTERN.match(header)
+        if match:
+            checksum_headers.append(header)
+    return checksum_headers
+
+
 def has_checksum_header(params):
     """
     Checks if a header starting with "x-amz-checksum-" is provided in a request.
@@ -3308,15 +3330,7 @@ def has_checksum_header(params):
     This function is considered private and subject to abrupt breaking changes or
     removal without prior announcement. Please do not use it directly.
     """
-    headers = params['headers']
-
-    # If a header matching the x-amz-checksum-* pattern is present, we
-    # assume a checksum has already been provided by the user.
-    for header in headers:
-        if CHECKSUM_HEADER_PATTERN.match(header):
-            return True
-
-    return False
+    return bool(get_checksum_algorithm_headers(params))
 
 
 def conditionally_calculate_checksum(params, **kwargs):
@@ -3670,8 +3684,6 @@ CLIENT_NAME_TO_HYPHENIZED_SERVICE_ID_OVERRIDES = {
     'globalaccelerator': 'global-accelerator',
     'iot-data': 'iot-data-plane',
     'iot-jobs-data': 'iot-jobs-data-plane',
-    'iotevents-data': 'iot-events-data',
-    'iotevents': 'iot-events',
     'iotwireless': 'iot-wireless',
     'kinesisanalytics': 'kinesis-analytics',
     'kinesisanalyticsv2': 'kinesis-analytics-v2',

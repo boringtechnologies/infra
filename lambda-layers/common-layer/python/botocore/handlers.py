@@ -50,6 +50,7 @@ from botocore.compat import (
 from botocore.docs.utils import (
     AppendParamDocumentation,
     AutoPopulatedParam,
+    DocumentModifiedShape,
     HideParamFromOperations,
 )
 from botocore.endpoint_provider import VALID_HOST_LABEL_RE
@@ -60,7 +61,6 @@ from botocore.exceptions import (
     UnsupportedTLSVersionWarning,
 )
 from botocore.regions import EndpointResolverBuiltins
-from botocore.serialize import TIMESTAMP_PRECISION_MILLISECOND
 from botocore.signers import (
     add_dsql_generate_db_auth_token_methods,
     add_generate_db_auth_token,
@@ -218,14 +218,7 @@ def set_operation_specific_signer(context, signing_name, **kwargs):
             return auth_type
 
         if auth_type == 'v4a':
-            # If sigv4a is chosen, we must add additional signing config for
-            # global signature.
-            region = _resolve_sigv4a_region(context)
-            signing = {'region': region, 'signing_name': signing_name}
-            if 'signing' in context:
-                context['signing'].update(signing)
-            else:
-                context['signing'] = signing
+            _set_sigv4a_signing_context(context, signing_name)
             signature_version = 'v4a'
         else:
             signature_version = 'v4'
@@ -263,6 +256,17 @@ def _resolve_sigv4a_region(context):
     if not region and context.get('signing', {}).get('region'):
         region = context['signing']['region']
     return region or '*'
+
+
+def _set_sigv4a_signing_context(context, signing_name):
+    # SigV4A signs for a region set rather than a single credential scope
+    # region, so ensure the request context reflects the configured region set.
+    region = _resolve_sigv4a_region(context)
+    signing = {'region': region, 'signing_name': signing_name}
+    if 'signing' in context:
+        context['signing'].update(signing)
+    else:
+        context['signing'] = signing
 
 
 def decode_console_output(parsed, **kwargs):
@@ -1070,9 +1074,18 @@ def remove_bedrock_runtime_invoke_model_with_bidirectional_stream(
         del class_attributes['invoke_model_with_bidirectional_stream']
 
 
-def enable_millisecond_timestamp_precision(serializer_kwargs, **kwargs):
-    """Event handler to enable millisecond precision"""
-    serializer_kwargs['timestamp_precision'] = TIMESTAMP_PRECISION_MILLISECOND
+def remove_connecthealth_start_medical_scribe_listening_session(
+    class_attributes, **kwargs
+):
+    """Operation requires h2 which is currently unsupported in Python"""
+    if 'start_medical_scribe_listening_session' in class_attributes:
+        del class_attributes['start_medical_scribe_listening_session']
+
+
+def remove_polly_start_speech_synthesis_stream(class_attributes, **kwargs):
+    """Operation requires h2 which is currently unsupported in Python"""
+    if 'start_speech_synthesis_stream' in class_attributes:
+        del class_attributes['start_speech_synthesis_stream']
 
 
 def add_retry_headers(request, **kwargs):
@@ -1310,6 +1323,21 @@ def _should_handle_200_error(operation_model, response_dict):
     return True
 
 
+def _map_oauth2_errors(response_dict, **kwargs):
+    # SSO OIDC follows the OAuth2 standard, which returns error messages in
+    # 'error_description' instead of the 'Message' field botocore expects.
+    try:
+        if response_dict.get('status_code') < 400:
+            return
+        body = json.loads(response_dict.get('body', b'{}'))
+        if message := body.get('error_description'):
+            if not body.get('Message', body.get("message")):
+                body['Message'] = message
+                response_dict['body'] = json.dumps(body).encode('utf-8')
+    except (ValueError, AttributeError, TypeError):
+        pass
+
+
 def _update_status_code(response, **kwargs):
     # Update the http_response status code when the parsed response has been
     # modified in a handler. This enables retries for cases like ``_handle_200_error``.
@@ -1404,6 +1432,9 @@ def _set_auth_scheme_preference_signer(context, signing_name, **kwargs):
         register_feature_id('BEARER_SERVICE_ENV_VARS')
         resolved_signature_version = 'bearer'
 
+    if resolved_signature_version == 'v4a':
+        _set_sigv4a_signing_context(context, signing_name)
+
     if resolved_signature_version == signature_version:
         return None
     return resolved_signature_version
@@ -1459,6 +1490,26 @@ BUILTIN_HANDLERS = [
         ClientMethodAlias('delete_whatsapp_message_media'),
     ),
     (
+        'getattr.cloudwatch.get_o_tel_enrichment',
+        ClientMethodAlias('get_otel_enrichment'),
+    ),
+    (
+        'getattr.cloudwatch.start_o_tel_enrichment',
+        ClientMethodAlias('start_otel_enrichment'),
+    ),
+    (
+        'getattr.cloudwatch.stop_o_tel_enrichment',
+        ClientMethodAlias('stop_otel_enrichment'),
+    ),
+    (
+        'getattr.cloudwatch.update_o_tel_enrichment',
+        ClientMethodAlias('update_otel_enrichment'),
+    ),
+    (
+        'getattr.signin.create_o_auth2_token',
+        ClientMethodAlias('create_oauth2_token'),
+    ),
+    (
         'before-parameter-build.s3.UploadPart',
         convert_body_to_file_like_object,
         REGISTER_LAST,
@@ -1478,10 +1529,23 @@ BUILTIN_HANDLERS = [
         remove_bedrock_runtime_invoke_model_with_bidirectional_stream,
     ),
     (
-        'creating-serializer.bedrock-agentcore',
-        enable_millisecond_timestamp_precision,
+        'creating-client-class.connecthealth',
+        remove_connecthealth_start_medical_scribe_listening_session,
+    ),
+    (
+        'creating-client-class.polly',
+        remove_polly_start_speech_synthesis_stream,
     ),
     ('after-call.iam', json_decode_policies),
+    (
+        'docs.*.iam.*.complete-section',
+        DocumentModifiedShape(
+            'policyDocumentType',
+            new_type='dict',
+            new_description=None,
+            new_example_value='{}',
+        ).replace_documentation_for_matching_shape,
+    ),
     ('after-call.ec2.GetConsoleOutput', decode_console_output),
     ('after-call.cloudformation.GetTemplate', json_decode_template_body),
     ('after-call.s3.GetBucketLocation', parse_get_bucket_location),
@@ -1491,6 +1555,7 @@ BUILTIN_HANDLERS = [
     ),
     ('before-parse.s3.*', handle_expires_header),
     ('before-parse.s3.*', _handle_200_error, REGISTER_FIRST),
+    ('before-parse.sso-oidc.*', _map_oauth2_errors),
     ('before-parameter-build', generate_idempotent_uuid),
     ('before-parameter-build', _handle_request_validation_mode_member),
     ('before-parameter-build.s3', validate_bucket_name),

@@ -14,16 +14,20 @@
 
 
 """Constants and types shared across multiple auth types."""
+
 from __future__ import annotations
 
+import hashlib
 import os
 import typing
 from base64 import standard_b64encode
 from collections import namedtuple
-from typing import Any, Dict, Mapping, Optional
+from collections.abc import Mapping, MutableMapping
+from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 
 from bson import Binary
 from pymongo.auth_oidc_shared import (
+    _get_authenticator,
     _OIDCAzureCallback,
     _OIDCGCPCallback,
     _OIDCK8SCallback,
@@ -31,6 +35,9 @@ from pymongo.auth_oidc_shared import (
     _OIDCTestCallback,
 )
 from pymongo.errors import ConfigurationError
+
+if TYPE_CHECKING:
+    from pymongo.hello import Hello
 
 MECHANISMS = frozenset(
     [
@@ -229,7 +236,7 @@ def _xor(fir: bytes, sec: bytes) -> bytes:
     return b"".join([bytes([x ^ y]) for x, y in zip(fir, sec)])
 
 
-def _parse_scram_response(response: bytes) -> Dict[bytes, bytes]:
+def _parse_scram_response(response: bytes) -> dict[bytes, bytes]:
     """Split a scram response into key, value pairs."""
     return dict(
         typing.cast(typing.Tuple[bytes, bytes], item.split(b"=", 1))
@@ -253,3 +260,87 @@ def _authenticate_scram_start(
         "options": {"skipEmptyExchange": True},
     }
     return nonce, first_bare, cmd
+
+
+def _password_digest(username: str, password: str) -> str:
+    """Get a password digest to use for authentication."""
+    if not isinstance(password, str):
+        raise TypeError("password must be an instance of str")
+    if len(password) == 0:
+        raise ValueError("password can't be empty")
+    if not isinstance(username, str):
+        raise TypeError(f"username must be an instance of str, not {type(username)}")
+
+    md5hash = hashlib.md5()  # noqa: S324
+    data = f"{username}:mongo:{password}"
+    md5hash.update(data.encode("utf-8"))
+    return md5hash.hexdigest()
+
+
+class _AuthContext:
+    def __init__(self, credentials: MongoCredential, address: tuple[str, int]) -> None:
+        self.credentials = credentials
+        self.speculative_authenticate: Optional[Mapping[str, Any]] = None
+        self.address = address
+
+    @staticmethod
+    def from_credentials(
+        creds: MongoCredential, address: tuple[str, int], spec_auth_map: Mapping[str, Any]
+    ) -> Optional[_AuthContext]:
+        spec_cls = spec_auth_map.get(creds.mechanism)
+        if spec_cls:
+            return cast(_AuthContext, spec_cls(creds, address))
+        return None
+
+    def speculate_command(self) -> Optional[MutableMapping[str, Any]]:
+        raise NotImplementedError
+
+    def parse_response(self, hello: Hello[Mapping[str, Any]]) -> None:
+        self.speculative_authenticate = hello.speculative_authenticate
+
+    def speculate_succeeded(self) -> bool:
+        return bool(self.speculative_authenticate)
+
+
+class _ScramContext(_AuthContext):
+    def __init__(
+        self, credentials: MongoCredential, address: tuple[str, int], mechanism: str
+    ) -> None:
+        super().__init__(credentials, address)
+        self.scram_data: Optional[tuple[bytes, bytes]] = None
+        self.mechanism = mechanism
+
+    def speculate_command(self) -> Optional[MutableMapping[str, Any]]:
+        nonce, first_bare, cmd = _authenticate_scram_start(self.credentials, self.mechanism)
+        # The 'db' field is included only on the speculative command.
+        cmd["db"] = self.credentials.source
+        # Save for later use.
+        self.scram_data = (nonce, first_bare)
+        return cmd
+
+
+class _X509Context(_AuthContext):
+    def speculate_command(self) -> MutableMapping[str, Any]:
+        cmd = {"authenticate": 1, "mechanism": "MONGODB-X509"}
+        if self.credentials.username is not None:
+            cmd["user"] = self.credentials.username
+        return cmd
+
+
+class _OIDCContext(_AuthContext):
+    def __init__(
+        self,
+        credentials: MongoCredential,
+        address: tuple[str, int],
+        authenticator_cls: Callable[..., Any],
+    ) -> None:
+        super().__init__(credentials, address)
+        self.authenticator_cls = authenticator_cls
+
+    def speculate_command(self) -> Optional[MutableMapping[str, Any]]:
+        authenticator = _get_authenticator(self.credentials, self.address, self.authenticator_cls)
+        cmd = authenticator.get_spec_auth_cmd()
+        if cmd is None:
+            return None
+        cmd["db"] = self.credentials.source
+        return cmd

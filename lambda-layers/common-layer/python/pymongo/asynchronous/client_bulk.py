@@ -16,28 +16,27 @@
 
 .. versionadded:: 4.9
 """
+
 from __future__ import annotations
 
 import copy
-import datetime
-import logging
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 from itertools import islice
 from typing import (
     TYPE_CHECKING,
     Any,
-    Mapping,
     Optional,
-    Type,
     Union,
 )
 
-from bson.objectid import ObjectId
-from bson.raw_bson import RawBSONDocument
-from pymongo import _csot, common
-from pymongo.asynchronous.client_session import AsyncClientSession, _validate_session_write_concern
+from pymongo import _csot
+from pymongo._telemetry import _generate_op_id_or_none
+from pymongo.asynchronous.client_session import AsyncClientSession
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.command_cursor import AsyncCommandCursor
+from pymongo.asynchronous.command_runner import (
+    run_bulk_write_command,
+)
 from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.asynchronous.helpers import _handle_reauth
 
@@ -45,30 +44,24 @@ if TYPE_CHECKING:
     from pymongo.asynchronous.mongo_client import AsyncMongoClient
     from pymongo.asynchronous.pool import AsyncConnection
 from pymongo._client_bulk_shared import (
+    _AgnosticClientBulkBase,
     _merge_command,
     _throw_client_bulk_write_exception,
 )
-from pymongo.common import (
-    validate_is_document_type,
-    validate_ok_for_replace,
-    validate_ok_for_update,
-)
+from pymongo.client_session_shared import _validate_session_write_concern
 from pymongo.errors import (
     ConfigurationError,
     ConnectionFailure,
     InvalidOperation,
     NotPrimaryError,
     OperationFailure,
+    PyMongoError,
     WaitQueueTimeoutError,
 )
 from pymongo.helpers_shared import _RETRYABLE_ERROR_CODES
-from pymongo.logger import _COMMAND_LOGGER, _CommandStatusMessage, _debug_log
 from pymongo.message import (
     _ClientBulkWriteContext,
     _convert_client_bulk_exception,
-    _convert_exception,
-    _convert_write_result,
-    _randint,
 )
 from pymongo.read_preferences import ReadPreference
 from pymongo.results import (
@@ -77,152 +70,15 @@ from pymongo.results import (
     InsertOneResult,
     UpdateResult,
 )
-from pymongo.typings import _DocumentOut, _Pipeline
 from pymongo.write_concern import WriteConcern
 
 _IS_SYNC = False
 
 
-class _AsyncClientBulk:
+class _AsyncClientBulk(_AgnosticClientBulkBase):
     """The private guts of the client-level bulk write API."""
 
-    def __init__(
-        self,
-        client: AsyncMongoClient[Any],
-        write_concern: WriteConcern,
-        ordered: bool = True,
-        bypass_document_validation: Optional[bool] = None,
-        comment: Optional[str] = None,
-        let: Optional[Any] = None,
-        verbose_results: bool = False,
-    ) -> None:
-        """Initialize a _AsyncClientBulk instance."""
-        self.client = client
-        self.write_concern = write_concern
-        self.let = let
-        if self.let is not None:
-            common.validate_is_document_type("let", self.let)
-        self.ordered = ordered
-        self.bypass_doc_val = bypass_document_validation
-        self.comment = comment
-        self.verbose_results = verbose_results
-        self.ops: list[tuple[str, Mapping[str, Any]]] = []
-        self.namespaces: list[str] = []
-        self.idx_offset: int = 0
-        self.total_ops: int = 0
-        self.executed = False
-        self.uses_collation = False
-        self.uses_array_filters = False
-        self.is_retryable = self.client.options.retry_writes
-        self.retrying = False
-        self.started_retryable_write = False
-
-    @property
-    def bulk_ctx_class(self) -> Type[_ClientBulkWriteContext]:
-        return _ClientBulkWriteContext
-
-    def add_insert(self, namespace: str, document: _DocumentOut) -> None:
-        """Add an insert document to the list of ops."""
-        validate_is_document_type("document", document)
-        # Generate ObjectId client side.
-        if not (isinstance(document, RawBSONDocument) or "_id" in document):
-            document["_id"] = ObjectId()
-        cmd = {"insert": -1, "document": document}
-        self.ops.append(("insert", cmd))
-        self.namespaces.append(namespace)
-        self.total_ops += 1
-
-    def add_update(
-        self,
-        namespace: str,
-        selector: Mapping[str, Any],
-        update: Union[Mapping[str, Any], _Pipeline],
-        multi: bool,
-        upsert: Optional[bool] = None,
-        collation: Optional[Mapping[str, Any]] = None,
-        array_filters: Optional[list[Mapping[str, Any]]] = None,
-        hint: Union[str, dict[str, Any], None] = None,
-        sort: Optional[Mapping[str, Any]] = None,
-    ) -> None:
-        """Create an update document and add it to the list of ops."""
-        validate_ok_for_update(update)
-        cmd = {
-            "update": -1,
-            "filter": selector,
-            "updateMods": update,
-            "multi": multi,
-        }
-        if upsert is not None:
-            cmd["upsert"] = upsert
-        if array_filters is not None:
-            self.uses_array_filters = True
-            cmd["arrayFilters"] = array_filters
-        if hint is not None:
-            cmd["hint"] = hint
-        if collation is not None:
-            self.uses_collation = True
-            cmd["collation"] = collation
-        if sort is not None:
-            cmd["sort"] = sort
-        if multi:
-            # A bulk_write containing an update_many is not retryable.
-            self.is_retryable = False
-        self.ops.append(("update", cmd))
-        self.namespaces.append(namespace)
-        self.total_ops += 1
-
-    def add_replace(
-        self,
-        namespace: str,
-        selector: Mapping[str, Any],
-        replacement: Mapping[str, Any],
-        upsert: Optional[bool] = None,
-        collation: Optional[Mapping[str, Any]] = None,
-        hint: Union[str, dict[str, Any], None] = None,
-        sort: Optional[Mapping[str, Any]] = None,
-    ) -> None:
-        """Create a replace document and add it to the list of ops."""
-        validate_ok_for_replace(replacement)
-        cmd = {
-            "update": -1,
-            "filter": selector,
-            "updateMods": replacement,
-            "multi": False,
-        }
-        if upsert is not None:
-            cmd["upsert"] = upsert
-        if hint is not None:
-            cmd["hint"] = hint
-        if collation is not None:
-            self.uses_collation = True
-            cmd["collation"] = collation
-        if sort is not None:
-            cmd["sort"] = sort
-        self.ops.append(("replace", cmd))
-        self.namespaces.append(namespace)
-        self.total_ops += 1
-
-    def add_delete(
-        self,
-        namespace: str,
-        selector: Mapping[str, Any],
-        multi: bool,
-        collation: Optional[Mapping[str, Any]] = None,
-        hint: Union[str, dict[str, Any], None] = None,
-    ) -> None:
-        """Create a delete document and add it to the list of ops."""
-        cmd = {"delete": -1, "filter": selector, "multi": multi}
-        if hint is not None:
-            cmd["hint"] = hint
-        if collation is not None:
-            self.uses_collation = True
-            cmd["collation"] = collation
-        if multi:
-            # A bulk_write containing an update_many is not retryable.
-            self.is_retryable = False
-        self.ops.append(("delete", cmd))
-        self.namespaces.append(namespace)
-        self.total_ops += 1
+    client: AsyncMongoClient[Any]
 
     @_handle_reauth
     async def write_command(
@@ -235,85 +91,21 @@ class _AsyncClientBulk:
         ns_docs: list[Mapping[str, Any]],
         client: AsyncMongoClient[Any],
     ) -> dict[str, Any]:
-        """A proxy for AsyncConnection.write_command that handles event publishing."""
+        """Run a client-level batch write command, returning the response as a dict."""
         cmd["ops"] = op_docs
         cmd["nsInfo"] = ns_docs
-        if _COMMAND_LOGGER.isEnabledFor(logging.DEBUG):
-            _debug_log(
-                _COMMAND_LOGGER,
-                message=_CommandStatusMessage.STARTED,
-                clientId=client._topology_settings._topology_id,
-                command=cmd,
-                commandName=next(iter(cmd)),
-                databaseName=bwc.db_name,
-                requestId=request_id,
-                operationId=request_id,
-                driverConnectionId=bwc.conn.id,
-                serverConnectionId=bwc.conn.server_connection_id,
-                serverHost=bwc.conn.address[0],
-                serverPort=bwc.conn.address[1],
-                serviceId=bwc.conn.service_id,
-            )
-        if bwc.publish:
-            bwc._start(cmd, request_id, op_docs, ns_docs)
         try:
-            reply = await bwc.conn.write_command(request_id, msg, bwc.codec)  # type: ignore[misc, arg-type]
-            duration = datetime.datetime.now() - bwc.start_time
-            if _COMMAND_LOGGER.isEnabledFor(logging.DEBUG):
-                _debug_log(
-                    _COMMAND_LOGGER,
-                    message=_CommandStatusMessage.SUCCEEDED,
-                    clientId=client._topology_settings._topology_id,
-                    durationMS=duration,
-                    reply=reply,
-                    commandName=next(iter(cmd)),
-                    databaseName=bwc.db_name,
-                    requestId=request_id,
-                    operationId=request_id,
-                    driverConnectionId=bwc.conn.id,
-                    serverConnectionId=bwc.conn.server_connection_id,
-                    serverHost=bwc.conn.address[0],
-                    serverPort=bwc.conn.address[1],
-                    serviceId=bwc.conn.service_id,
-                )
-            if bwc.publish:
-                bwc._succeed(request_id, reply, duration)  # type: ignore[arg-type]
-            # Process the response from the server.
-            await self.client._process_response(reply, bwc.session)  # type: ignore[arg-type]
+            result_docs, _, _ = await run_bulk_write_command(
+                bwc,
+                cmd,
+                request_id,
+                msg,  # type: ignore[arg-type]
+                client=client,
+            )
+            reply = result_docs[0]
         except Exception as exc:
-            duration = datetime.datetime.now() - bwc.start_time
-            if isinstance(exc, (NotPrimaryError, OperationFailure)):
-                failure: _DocumentOut = exc.details  # type: ignore[assignment]
-            else:
-                failure = _convert_exception(exc)
-            if _COMMAND_LOGGER.isEnabledFor(logging.DEBUG):
-                _debug_log(
-                    _COMMAND_LOGGER,
-                    message=_CommandStatusMessage.FAILED,
-                    clientId=client._topology_settings._topology_id,
-                    durationMS=duration,
-                    failure=failure,
-                    commandName=next(iter(cmd)),
-                    databaseName=bwc.db_name,
-                    requestId=request_id,
-                    operationId=request_id,
-                    driverConnectionId=bwc.conn.id,
-                    serverConnectionId=bwc.conn.server_connection_id,
-                    serverHost=bwc.conn.address[0],
-                    serverPort=bwc.conn.address[1],
-                    serviceId=bwc.conn.service_id,
-                    isServerSideError=isinstance(exc, OperationFailure),
-                )
-
-            if bwc.publish:
-                bwc._fail(request_id, failure, duration)
             # Top-level error will be embedded in ClientBulkWriteException.
             reply = {"error": exc}
-            # Process the response from the server.
-            if isinstance(exc, OperationFailure):
-                await self.client._process_response(exc.details, bwc.session)  # type: ignore[arg-type]
-            else:
-                await self.client._process_response({}, bwc.session)  # type: ignore[arg-type]
         return reply  # type: ignore[return-value]
 
     async def unack_write(
@@ -326,81 +118,26 @@ class _AsyncClientBulk:
         ns_docs: list[Mapping[str, Any]],
         client: AsyncMongoClient[Any],
     ) -> Optional[Mapping[str, Any]]:
-        """A proxy for AsyncConnection.unack_write that handles event publishing."""
-        if _COMMAND_LOGGER.isEnabledFor(logging.DEBUG):
-            _debug_log(
-                _COMMAND_LOGGER,
-                message=_CommandStatusMessage.STARTED,
-                clientId=client._topology_settings._topology_id,
-                command=cmd,
-                commandName=next(iter(cmd)),
-                databaseName=bwc.db_name,
-                requestId=request_id,
-                operationId=request_id,
-                driverConnectionId=bwc.conn.id,
-                serverConnectionId=bwc.conn.server_connection_id,
-                serverHost=bwc.conn.address[0],
-                serverPort=bwc.conn.address[1],
-                serviceId=bwc.conn.service_id,
-            )
-        if bwc.publish:
-            cmd = bwc._start(cmd, request_id, op_docs, ns_docs)
+        """Send an unacknowledged client-level batch write command."""
+        # Historically the STARTED log omits the ops/nsInfo while the published
+        # CommandStartedEvent includes them, so log ``cmd`` but publish a copy
+        # carrying those fields.
+        published = dict(cmd)
+        published["ops"] = op_docs
+        published["nsInfo"] = ns_docs
         try:
-            result = await bwc.conn.unack_write(msg, bwc.max_bson_size)  # type: ignore[func-returns-value, misc, override]
-            duration = datetime.datetime.now() - bwc.start_time
-            if result is not None:
-                reply = _convert_write_result(bwc.name, cmd, result)  # type: ignore[arg-type]
-            else:
-                # Comply with APM spec.
-                reply = {"ok": 1}
-                if _COMMAND_LOGGER.isEnabledFor(logging.DEBUG):
-                    _debug_log(
-                        _COMMAND_LOGGER,
-                        message=_CommandStatusMessage.SUCCEEDED,
-                        clientId=client._topology_settings._topology_id,
-                        durationMS=duration,
-                        reply=reply,
-                        commandName=next(iter(cmd)),
-                        databaseName=bwc.db_name,
-                        requestId=request_id,
-                        operationId=request_id,
-                        driverConnectionId=bwc.conn.id,
-                        serverConnectionId=bwc.conn.server_connection_id,
-                        serverHost=bwc.conn.address[0],
-                        serverPort=bwc.conn.address[1],
-                        serviceId=bwc.conn.service_id,
-                    )
-            if bwc.publish:
-                bwc._succeed(request_id, reply, duration)
+            result_docs, _, _ = await run_bulk_write_command(
+                bwc,
+                cmd,
+                request_id,
+                msg,
+                client=client,
+                orig=published,
+                max_doc_size=bwc.max_bson_size,
+                unacknowledged=True,
+            )
+            reply: Mapping[str, Any] = result_docs[0]
         except Exception as exc:
-            duration = datetime.datetime.now() - bwc.start_time
-            if isinstance(exc, OperationFailure):
-                failure: _DocumentOut = _convert_write_result(bwc.name, cmd, exc.details)  # type: ignore[arg-type]
-            elif isinstance(exc, NotPrimaryError):
-                failure = exc.details  # type: ignore[assignment]
-            else:
-                failure = _convert_exception(exc)
-            if _COMMAND_LOGGER.isEnabledFor(logging.DEBUG):
-                _debug_log(
-                    _COMMAND_LOGGER,
-                    message=_CommandStatusMessage.FAILED,
-                    clientId=client._topology_settings._topology_id,
-                    durationMS=duration,
-                    failure=failure,
-                    commandName=next(iter(cmd)),
-                    databaseName=bwc.db_name,
-                    requestId=request_id,
-                    operationId=request_id,
-                    driverConnectionId=bwc.conn.id,
-                    serverConnectionId=bwc.conn.server_connection_id,
-                    serverHost=bwc.conn.address[0],
-                    serverPort=bwc.conn.address[1],
-                    serviceId=bwc.conn.service_id,
-                    isServerSideError=isinstance(exc, OperationFailure),
-                )
-            if bwc.publish:
-                assert bwc.start_time is not None
-                bwc._fail(request_id, failure, duration)
             # Top-level error will be embedded in ClientBulkWriteException.
             reply = {"error": exc}
         return reply
@@ -488,7 +225,7 @@ class _AsyncClientBulk:
         write_concern: WriteConcern,
         session: Optional[AsyncClientSession],
         conn: AsyncConnection,
-        op_id: int,
+        op_id: Optional[int],
         retryable: bool,
         full_result: MutableMapping[str, Any],
         final_write_concern: Optional[WriteConcern] = None,
@@ -499,7 +236,7 @@ class _AsyncClientBulk:
         listeners = self.client._event_listeners
 
         # AsyncConnection.command validates the session, but we use
-        # AsyncConnection.write_command
+        # run_bulk_write_command.
         conn.validate_session(self.client, session)
 
         bwc = self.bulk_ctx_class(
@@ -563,9 +300,17 @@ class _AsyncClientBulk:
                         error, ConnectionFailure
                     ) and not isinstance(error, (NotPrimaryError, WaitQueueTimeoutError))
 
+                    retryable_label_error = isinstance(
+                        error, PyMongoError
+                    ) and error.has_error_label("RetryableError")
+
                     # Synthesize the full bulk result without modifying the
                     # current one because this write operation may be retried.
-                    if retryable and (retryable_top_level_error or retryable_network_error):
+                    if retryable and (
+                        retryable_top_level_error
+                        or retryable_network_error
+                        or retryable_label_error
+                    ):
                         full = copy.deepcopy(full_result)
                         _merge_command(self.ops, self.idx_offset, full, result)
                         _throw_client_bulk_write_exception(full, self.verbose_results)
@@ -634,7 +379,7 @@ class _AsyncClientBulk:
             "updateResults": {},
             "deleteResults": {},
         }
-        op_id = _randint()
+        op_id = _generate_op_id_or_none(self.client._event_listeners)
 
         async def retryable_bulk(
             session: Optional[AsyncClientSession],
@@ -675,7 +420,7 @@ class _AsyncClientBulk:
         db_name = "admin"
         cmd_name = "bulkWrite"
         listeners = self.client._event_listeners
-        op_id = _randint()
+        op_id = _generate_op_id_or_none(listeners)
 
         bwc = self.bulk_ctx_class(
             db_name,

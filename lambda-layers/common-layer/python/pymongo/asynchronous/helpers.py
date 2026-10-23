@@ -13,12 +13,13 @@
 # limitations under the License.
 
 """Miscellaneous pieces that need to be synchronized."""
+
 from __future__ import annotations
 
 import asyncio
 import builtins
+import functools
 import socket
-import sys
 from typing import (
     Any,
     Callable,
@@ -26,6 +27,7 @@ from typing import (
     cast,
 )
 
+from pymongo import _op_id
 from pymongo.errors import (
     OperationFailure,
 )
@@ -38,6 +40,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def _handle_reauth(func: F) -> F:
+    @functools.wraps(func)
     async def inner(*args: Any, **kwargs: Any) -> Any:
         no_reauth = kwargs.pop("no_reauth", False)
         from pymongo.asynchronous.pool import AsyncConnection
@@ -61,7 +64,9 @@ def _handle_reauth(func: F) -> F:
                         conn = arg.conn  # type: ignore[assignment]
                         break
                 if conn:
-                    await conn.authenticate(reauthenticate=True)
+                    # Don't let reauth's auth commands inherit the in-flight op's id.
+                    with _op_id._OpIdContext(None):
+                        await conn.authenticate(reauthenticate=True)
                 else:
                     raise
                 return await func(*args, **kwargs)
@@ -88,15 +93,5 @@ async def _getaddrinfo(
         return socket.getaddrinfo(host, port, **kwargs)
 
 
-if sys.version_info >= (3, 10):
-    anext = builtins.anext
-    aiter = builtins.aiter
-else:
-
-    async def anext(cls: Any) -> Any:
-        """Compatibility function until we drop 3.9 support: https://docs.python.org/3/library/functions.html#anext."""
-        return await cls.__anext__()
-
-    def aiter(cls: Any) -> Any:
-        """Compatibility function until we drop 3.9 support: https://docs.python.org/3/library/functions.html#anext."""
-        return cls.__aiter__()
+anext = builtins.anext
+aiter = builtins.aiter

@@ -13,12 +13,13 @@
 # limitations under the License.
 
 """Miscellaneous pieces that need to be synchronized."""
+
 from __future__ import annotations
 
 import asyncio
 import builtins
+import functools
 import socket
-import sys
 from typing import (
     Any,
     Callable,
@@ -26,6 +27,7 @@ from typing import (
     cast,
 )
 
+from pymongo import _op_id
 from pymongo.errors import (
     OperationFailure,
 )
@@ -38,6 +40,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def _handle_reauth(func: F) -> F:
+    @functools.wraps(func)
     def inner(*args: Any, **kwargs: Any) -> Any:
         no_reauth = kwargs.pop("no_reauth", False)
         from pymongo.message import _BulkWriteContext
@@ -61,7 +64,9 @@ def _handle_reauth(func: F) -> F:
                         conn = arg.conn  # type: ignore[assignment]
                         break
                 if conn:
-                    conn.authenticate(reauthenticate=True)
+                    # Don't let reauth's auth commands inherit the in-flight op's id.
+                    with _op_id._OpIdContext(None):
+                        conn.authenticate(reauthenticate=True)
                 else:
                     raise
                 return func(*args, **kwargs)
@@ -88,15 +93,5 @@ def _getaddrinfo(
         return socket.getaddrinfo(host, port, **kwargs)
 
 
-if sys.version_info >= (3, 10):
-    next = builtins.next
-    iter = builtins.iter
-else:
-
-    def next(cls: Any) -> Any:
-        """Compatibility function until we drop 3.9 support: https://docs.python.org/3/library/functions.html#next."""
-        return cls.__next__()
-
-    def iter(cls: Any) -> Any:
-        """Compatibility function until we drop 3.9 support: https://docs.python.org/3/library/functions.html#next."""
-        return cls.__iter__()
+next = builtins.next
+iter = builtins.iter

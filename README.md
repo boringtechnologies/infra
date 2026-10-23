@@ -22,6 +22,7 @@ This repository contains the complete Terraform infrastructure as code (IaC) for
   - Stripe webhook processing
   - Email notifications
   - Usage analytics and logging
+  - Daily business opportunity discovery and email digest for ViveSound, Boring Technologies, and Farawatt
 
 - **DynamoDB Tables**
   - Usage logs
@@ -60,30 +61,16 @@ aws configure --profile boring-tech
 
 ### Secrets Configuration
 
-Create `secrets.tfvars` in the repository root:
+Create your local Terraform variables file from the tracked example:
 
-```hcl
-# AWS Configuration
-aws_profile = "boring-tech"
-region      = "us-east-1"
-
-# Cryptlex API
-mongodb_uri = "your-mongodb-uri"
-account_alias    = "your-account-alias"
-base_url         = "https://api.cryptlex.com/v3"
-
-# Stripe (Production)
-stripe_secret_key_prod        = "sk_live_..."
-webhook_signing_secret_prod   = "whsec_..."
-stripe_price_cents            = 2999
-stripe_product_id             = "prod_..."
-
-# Stripe (dev)
-stripe_secret_key_dev     = "sk_test_..."
-webhook_signing_secret_dev = "whsec_..."
+```bash
+cp secrets.tfvars.example secrets.tfvars
+# Edit secrets.tfvars and replace every REPLACE_ME placeholder.
 ```
 
 **⚠️ Never commit `secrets.tfvars` to version control!**
+
+The sender address must be verified with Amazon SES in the configured AWS region. Create API credentials for SAM.gov, Brave Search, and OpenAI; all three services are used by the scheduled digest.
 
 ---
 
@@ -99,6 +86,8 @@ cd ./scripts
 ```
 
 This creates `lambda.zip` files in each `modules/lambda/*/` directory.
+
+Run the focused behavior tests with `python3 -m unittest discover -s tests -v`.
 
 ### Step 2: Initialize Terraform
 
@@ -173,12 +162,17 @@ infra/
 │   ├── lambda/                 # Individual Lambda functions
 │   │   ├── list-records/
 │   │   ├── update-records/
+│   │   ├── opportunity-digest/
 │   │   └── ...
 │   ├── lambda-endpoint/        # Lambda + API Gateway integration
 │   ├── nextjs-static-site/     # S3 + CloudFront for static sites
 │   └── nextjs-pipeline/        # CodePipeline + CodeBuild
+├── tests/
+│   └── test_opportunity_digest.py
 └── zip_lambdas.sh              # Package Lambda functions
 ```
+
+The opportunity digest searches SAM.gov and Brave Search, ranks candidates for AI review, and independently evaluates pursuit fit for ViveSound, Boring Technologies, and Farawatt. It sends strong matches in one SES digest and records each opportunity/company pair in the existing MongoDB `vinyl_collection.opportunity_digest_emailed` collection. Funnel counts and bounded rejection samples are written to CloudWatch Logs. The default schedule is daily, the strong-fit floor is 80, and up to 20 ranked candidates per company are assessed; configure `opportunity_max_ai_candidates_per_company` and `opportunity_include_possible_matches` to tune review volume and the optional 65-79 section.
 
 ---
 

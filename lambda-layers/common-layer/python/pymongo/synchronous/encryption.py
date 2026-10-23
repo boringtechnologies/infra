@@ -13,33 +13,27 @@
 # limitations under the License.
 
 """Support for explicit client-side field level encryption."""
+
 from __future__ import annotations
 
-import contextlib
-import enum
+import functools
 import socket
 import time as time  # noqa: PLC0414 # needed in sync version
 import uuid
 import weakref
+from collections.abc import Generator, Mapping, MutableMapping, Sequence
 from copy import deepcopy
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
-    Generator,
     Generic,
-    Iterator,
-    Mapping,
-    MutableMapping,
     Optional,
-    Sequence,
     Union,
     cast,
 )
 
 try:
     from pymongocrypt.errors import MongoCryptError  # type:ignore[import]
-    from pymongocrypt.mongocrypt import MongoCryptOptions  # type:ignore[import]
     from pymongocrypt.synchronous.auto_encrypter import AutoEncrypter  # type:ignore[import]
     from pymongocrypt.synchronous.explicit_encrypter import (  # type:ignore[import]
         ExplicitEncrypter,
@@ -56,16 +50,26 @@ except ImportError:
 from bson import _dict_to_bson, decode, encode
 from bson.binary import STANDARD, UUID_SUBTYPE, Binary
 from bson.codec_options import CodecOptions
-from bson.errors import BSONError
 from bson.raw_bson import DEFAULT_RAW_BSON_OPTIONS, RawBSONDocument, _inflate_bson
-from pymongo import _csot
-from pymongo.common import CONNECT_TIMEOUT
+from pymongo import _csot, _op_id
+from pymongo._kms_connect_shared import KMSConnectCallback
 from pymongo.daemon import _spawn_daemon
 from pymongo.encryption_options import (
     AutoEncryptionOpts,
     RangeOpts,
-    TextOpts,
+    StringOpts,
+    # Re-exported for backwards compatibility: TextOpts is deprecated but must
+    # remain importable from this module until it is removed.
+    TextOpts,  # noqa: F401
     check_min_pymongocrypt,
+)
+from pymongo.encryption_shared import (
+    # Algorithm and QueryType are re-exported for backwards compatibility.
+    Algorithm,  # noqa: F401
+    QueryType,  # noqa: F401
+    RewrapManyDataKeyResult,
+    _create_mongocrypt_options,
+    _wrap_encryption_errors,
 )
 from pymongo.errors import (
     ConfigurationError,
@@ -80,12 +84,12 @@ from pymongo.network_layer import sendall
 from pymongo.operations import UpdateOne
 from pymongo.pool_options import PoolOptions
 from pymongo.pool_shared import (
-    _configured_socket,
     _raise_connection_failure,
 )
 from pymongo.read_concern import ReadConcern
-from pymongo.results import BulkWriteResult, DeleteResult
+from pymongo.results import DeleteResult
 from pymongo.ssl_support import BLOCKING_IO_ERRORS, get_ssl_context
+from pymongo.synchronous._kms_connect import _KMS_CONNECT_TIMEOUT, _connect_kms
 from pymongo.synchronous.collection import Collection
 from pymongo.synchronous.cursor import Cursor
 from pymongo.synchronous.database import Database
@@ -97,42 +101,18 @@ from pymongo.write_concern import WriteConcern
 if TYPE_CHECKING:
     from pymongocrypt.mongocrypt import MongoCryptKmsContext
 
-    from pymongo.pyopenssl_context import _sslConn
-    from pymongo.typings import _Address
-
 
 _IS_SYNC = True
 
 _HTTPS_PORT = 443
-_KMS_CONNECT_TIMEOUT = CONNECT_TIMEOUT  # CDRIVER-3262 redefined this value to CONNECT_TIMEOUT
 _MONGOCRYPTD_TIMEOUT_MS = 10000
 
 _DATA_KEY_OPTS: CodecOptions[dict[str, Any]] = CodecOptions(
-    document_class=Dict[str, Any], uuid_representation=STANDARD
+    document_class=dict[str, Any], uuid_representation=STANDARD
 )
 # Use RawBSONDocument codec options to avoid needlessly decoding
 # documents from the key vault.
 _KEY_VAULT_OPTS = CodecOptions(document_class=RawBSONDocument)
-
-
-def _connect_kms(address: _Address, opts: PoolOptions) -> Union[socket.socket, _sslConn]:
-    try:
-        return _configured_socket(address, opts)
-    except Exception as exc:
-        _raise_connection_failure(address, exc, timeout_details=_get_timeout_details(opts))
-
-
-@contextlib.contextmanager
-def _wrap_encryption_errors() -> Iterator[None]:
-    """Context manager to wrap encryption related errors."""
-    try:
-        yield
-    except BSONError:
-        # BSON encoding/decoding errors are unrelated to encryption so
-        # we should propagate them unchanged.
-        raise
-    except Exception as exc:
-        raise EncryptionError(exc) from exc
 
 
 class _EncryptionIO(MongoCryptCallback):  # type: ignore[misc]
@@ -187,20 +167,28 @@ class _EncryptionIO(MongoCryptCallback):  # type: ignore[misc]
                 False,  # disable_ocsp_endpoint_check
                 _IS_SYNC,
             )
-        # CSOT: set timeout for socket creation.
+        address = parse_host(endpoint, _HTTPS_PORT)
+        if address[0].endswith(".sock"):
+            raise ConfigurationError(f"Invalid KMS endpoint {endpoint!r}")
+        sleep_u = kms_context.usleep
+        if sleep_u:
+            sleep_sec = float(sleep_u) / 1e6
+            time.sleep(sleep_sec)
+        # Set the connect timeout after the retry backoff so the budget
+        # reflects the sleep.
         connect_timeout = max(_csot.clamp_remaining(_KMS_CONNECT_TIMEOUT), 0.001)
         opts = PoolOptions(
             connect_timeout=connect_timeout,
             socket_timeout=connect_timeout,
             ssl_context=ctx,
         )
-        address = parse_host(endpoint, _HTTPS_PORT)
-        sleep_u = kms_context.usleep
-        if sleep_u:
-            sleep_sec = float(sleep_u) / 1e6
-            time.sleep(sleep_sec)
         try:
-            conn = _connect_kms(address, opts)
+            conn = _connect_kms(
+                address,
+                opts,
+                self.opts._kms_connect_callback,
+                connect_timeout,
+            )
             try:
                 sendall(conn, message)
                 while kms_context.bytes_needed > 0:
@@ -236,6 +224,8 @@ class _EncryptionIO(MongoCryptCallback):  # type: ignore[misc]
                 conn.close()
         except MongoCryptError:
             raise  # Propagate MongoCryptError errors directly.
+        except ConfigurationError:
+            raise  # A callback contract violation is not transient.
         except Exception as exc:
             remaining = _csot.remaining()
             if isinstance(exc, NetworkTimeout) or (remaining is not None and remaining <= 0):
@@ -354,29 +344,6 @@ class _EncryptionIO(MongoCryptCallback):  # type: ignore[misc]
             self.mongocryptd_client = None
 
 
-class RewrapManyDataKeyResult:
-    """Result object returned by a :meth:`~ClientEncryption.rewrap_many_data_key` operation.
-
-    .. versionadded:: 4.2
-    """
-
-    def __init__(self, bulk_write_result: Optional[BulkWriteResult] = None) -> None:
-        self._bulk_write_result = bulk_write_result
-
-    @property
-    def bulk_write_result(self) -> Optional[BulkWriteResult]:
-        """The result of the bulk write operation used to update the key vault
-        collection with one or more rewrapped data keys. If
-        :meth:`~ClientEncryption.rewrap_many_data_key` does not find any matching keys to rewrap,
-        no bulk write operation will be executed and this field will be
-        ``None``.
-        """
-        return self._bulk_write_result
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self._bulk_write_result!r})"
-
-
 class _Encrypter:
     """Encrypts and decrypts MongoDB commands.
 
@@ -469,7 +436,9 @@ class _Encrypter:
         self._check_closed()
         encoded_cmd = _dict_to_bson(cmd, False, codec_options)
         with _wrap_encryption_errors():
-            encrypted_cmd = self._auto_encrypter.encrypt(database, encoded_cmd)
+            # Don't let encryption's sub-commands inherit the in-flight op's id.
+            with _op_id._OpIdContext(None):
+                encrypted_cmd = self._auto_encrypter.encrypt(database, encoded_cmd)
             # TODO: PYTHON-1922 avoid decoding the encrypted_cmd.
             return _inflate_bson(encrypted_cmd, DEFAULT_RAW_BSON_OPTIONS)
 
@@ -482,7 +451,9 @@ class _Encrypter:
         """
         self._check_closed()
         with _wrap_encryption_errors():
-            return cast(bytes, self._auto_encrypter.decrypt(response))
+            # Don't let decryption's sub-commands inherit the in-flight op's id.
+            with _op_id._OpIdContext(None):
+                return cast(bytes, self._auto_encrypter.decrypt(response))
 
     def _check_closed(self) -> None:
         if self._closed:
@@ -497,89 +468,45 @@ class _Encrypter:
             self._internal_client = None
 
 
-class Algorithm(str, enum.Enum):
-    """An enum that defines the supported encryption algorithms."""
+@functools.lru_cache(maxsize=1)
+def _string_opts_kwarg() -> str:
+    """The name the installed pymongocrypt gives the string index options.
 
-    AEAD_AES_256_CBC_HMAC_SHA_512_Deterministic = "AEAD_AES_256_CBC_HMAC_SHA_512-Deterministic"
-    """AEAD_AES_256_CBC_HMAC_SHA_512_Deterministic."""
-    AEAD_AES_256_CBC_HMAC_SHA_512_Random = "AEAD_AES_256_CBC_HMAC_SHA_512-Random"
-    """AEAD_AES_256_CBC_HMAC_SHA_512_Random."""
-    INDEXED = "Indexed"
-    """Indexed.
-
-    .. versionadded:: 4.2
+    pymongocrypt renamed ``text_opts`` to ``string_opts`` in 1.19 and accepts
+    only one name per release. The rename landed on master before any release
+    carried it, so resolve the name from the installed signature rather than
+    from a version comparison. Resolved lazily and cached because importing
+    :mod:`inspect` is too expensive to do on the import path.
     """
-    UNINDEXED = "Unindexed"
-    """Unindexed.
+    import inspect
 
-    .. versionadded:: 4.2
+    params = inspect.signature(ExplicitEncrypter.encrypt).parameters
+    return "string_opts" if "string_opts" in params else "text_opts"
+
+
+def _resolve_string_opts(
+    string_opts: Optional[StringOpts], text_opts: Optional[StringOpts]
+) -> Optional[StringOpts]:
+    """Resolve string_opts and its former name, text_opts.
+
+    pymongocrypt accepts only one of the two names per release, so passing the
+    name the installed pymongocrypt does not support is an error.
     """
-    RANGE = "Range"
-    """Range.
-
-    .. versionadded:: 4.9
-    """
-    RANGEPREVIEW = "RangePreview"
-    """**DEPRECATED** - RangePreview.
-
-    .. note:: Support for RangePreview is deprecated. Use :attr:`Algorithm.RANGE` instead.
-
-    .. versionadded:: 4.4
-    """
-    TEXTPREVIEW = "TextPreview"
-    """**BETA** - TextPreview.
-
-    .. versionadded:: 4.15
-    """
-
-
-class QueryType(str, enum.Enum):
-    """An enum that defines the supported values for explicit encryption query_type.
-
-    .. versionadded:: 4.2
-    """
-
-    EQUALITY = "equality"
-    """Used to encrypt a value for an equality query."""
-
-    RANGE = "range"
-    """Used to encrypt a value for a range query.
-
-    .. versionadded:: 4.9
-    """
-
-    RANGEPREVIEW = "RangePreview"
-    """**DEPRECATED** - Used to encrypt a value for a rangePreview query.
-
-    .. note:: Support for RangePreview is deprecated. Use :attr:`QueryType.RANGE` instead.
-
-    .. versionadded:: 4.4
-    """
-
-    PREFIXPREVIEW = "prefixPreview"
-    """**BETA** - Used to encrypt a value for a prefixPreview query.
-
-    .. versionadded:: 4.15
-    """
-
-    SUFFIXPREVIEW = "suffixPreview"
-    """**BETA** - Used to encrypt a value for a suffixPreview query.
-
-    .. versionadded:: 4.15
-    """
-
-    SUBSTRINGPREVIEW = "substringPreview"
-    """**BETA** - Used to encrypt a value for a substringPreview query.
-
-    .. versionadded:: 4.15
-    """
-
-
-def _create_mongocrypt_options(**kwargs: Any) -> MongoCryptOptions:
-    # For compat with pymongocrypt <1.13, avoid setting the default key_expiration_ms.
-    if kwargs.get("key_expiration_ms") is None:
-        kwargs.pop("key_expiration_ms", None)
-    return MongoCryptOptions(**kwargs, enable_multiple_collinfo=True)
+    if string_opts is not None and text_opts is not None:
+        raise ConfigurationError("Cannot set both string_opts and text_opts")
+    if string_opts is None and text_opts is None:
+        return None
+    if text_opts is not None and _string_opts_kwarg() == "string_opts":
+        raise ConfigurationError(
+            "text_opts is not supported by the installed pymongocrypt "
+            "(1.19 or later). Use string_opts instead."
+        )
+    if string_opts is not None and _string_opts_kwarg() == "text_opts":
+        raise ConfigurationError(
+            "string_opts requires pymongocrypt 1.19 or later. Use text_opts "
+            "with the installed pymongocrypt, or upgrade pymongocrypt."
+        )
+    return string_opts if string_opts is not None else text_opts
 
 
 class ClientEncryption(Generic[_DocumentType]):
@@ -593,6 +520,7 @@ class ClientEncryption(Generic[_DocumentType]):
         codec_options: CodecOptions[_DocumentTypeArg],
         kms_tls_options: Optional[Mapping[str, Any]] = None,
         key_expiration_ms: Optional[int] = None,
+        kms_connect_callback: Optional[KMSConnectCallback] = None,
     ) -> None:
         """Explicit client-side field level encryption.
 
@@ -662,7 +590,22 @@ class ClientEncryption(Generic[_DocumentType]):
         :param key_expiration_ms: The cache expiration time for data encryption keys.
             Defaults to ``None`` which defers to libmongocrypt's default which is currently 60000.
             Set to 0 to disable key expiration.
+        :param kms_connect_callback: A callable that opens the connection to a
+            KMS host, e.g. to route KMS requests through a proxy. It receives
+            a :class:`~pymongo.encryption_options.KMSConnectContext` and
+            returns a connected, unwrapped :class:`socket.socket`, over which
+            the driver performs the KMS TLS handshake.
+            Must be a regular function.
+            The callback is responsible for honoring ``context.timeout``.
+            When a CSOT timeout is active, the driver stops waiting at the
+            deadline and closes any socket the callback yields later. For an
+            ordinary HTTP proxy, pass
+            :class:`~pymongo.encryption_options.HTTPProxyKMSConnect`.
+            Defaults to ``None``, meaning the driver connects to KMS hosts
+            directly.
 
+        .. versionchanged:: 4.19
+           Added the `kms_connect_callback` parameter.
         .. versionchanged:: 4.12
            Added the `key_expiration_ms` parameter.
         .. versionchanged:: 4.0
@@ -702,6 +645,7 @@ class ClientEncryption(Generic[_DocumentType]):
             key_vault_namespace,
             kms_tls_options=kms_tls_options,
             key_expiration_ms=key_expiration_ms,
+            kms_connect_callback=kms_connect_callback,
         )
         self._kms_ssl_contexts = _parse_kms_tls_options(opts._kms_tls_options, _IS_SYNC)
         self._io_callbacks: Optional[_EncryptionIO] = _EncryptionIO(
@@ -910,7 +854,7 @@ class ClientEncryption(Generic[_DocumentType]):
         contention_factor: Optional[int] = None,
         range_opts: Optional[RangeOpts] = None,
         is_expression: bool = False,
-        text_opts: Optional[TextOpts] = None,
+        string_opts: Optional[StringOpts] = None,
     ) -> Any:
         self._check_closed()
         if isinstance(key_id, uuid.UUID):
@@ -930,10 +874,10 @@ class ClientEncryption(Generic[_DocumentType]):
                 range_opts.document,
                 codec_options=self._codec_options,
             )
-        text_opts_bytes = None
-        if text_opts:
-            text_opts_bytes = encode(
-                text_opts.document,
+        string_opts_bytes = None
+        if string_opts:
+            string_opts_bytes = encode(
+                string_opts.document,
                 codec_options=self._codec_options,
             )
         with _wrap_encryption_errors():
@@ -946,8 +890,7 @@ class ClientEncryption(Generic[_DocumentType]):
                 contention_factor=contention_factor,
                 range_opts=range_opts_bytes,
                 is_expression=is_expression,
-                # For compatibility with pymongocrypt < 1.16:
-                **{"text_opts": text_opts_bytes} if text_opts_bytes else {},
+                **({_string_opts_kwarg(): string_opts_bytes} if string_opts_bytes else {}),
             )
             return decode(encrypted_doc)["v"]
 
@@ -960,7 +903,8 @@ class ClientEncryption(Generic[_DocumentType]):
         query_type: Optional[str] = None,
         contention_factor: Optional[int] = None,
         range_opts: Optional[RangeOpts] = None,
-        text_opts: Optional[TextOpts] = None,
+        string_opts: Optional[StringOpts] = None,
+        text_opts: Optional[StringOpts] = None,
     ) -> Binary:
         """Encrypt a BSON value with a given key and algorithm.
 
@@ -981,12 +925,20 @@ class ClientEncryption(Generic[_DocumentType]):
             used.
         :param range_opts: Index options for `range` queries. See
             :class:`RangeOpts` for some valid options.
-        :param text_opts: Index options for `textPreview` queries. See
-            :class:`TextOpts` for some valid options.
+        :param string_opts: Index options for `prefix`, `suffix`, and
+            `substring` queries. See :class:`StringOpts` for some valid options.
+        :param text_opts: **DEPRECATED** - The former name of `string_opts`,
+            added in pymongocrypt 1.16 and accepted only through pymongocrypt
+            1.18. Passing it to pymongocrypt 1.19 or later, or passing both
+            names, raises :exc:`~pymongo.errors.ConfigurationError`.
 
         :return: The encrypted value, a :class:`~bson.binary.Binary` with subtype 6.
 
-        .. versionchanged:: 4.9
+        .. versionchanged:: 4.18
+           Added the `string_opts` parameter, replacing the deprecated
+           `text_opts`.
+
+        .. versionchanged:: 4.15
            Added the `text_opts` parameter.
 
         .. versionchanged:: 4.9
@@ -1009,7 +961,7 @@ class ClientEncryption(Generic[_DocumentType]):
                 contention_factor=contention_factor,
                 range_opts=range_opts,
                 is_expression=False,
-                text_opts=text_opts,
+                string_opts=_resolve_string_opts(string_opts, text_opts),
             ),
         )
 

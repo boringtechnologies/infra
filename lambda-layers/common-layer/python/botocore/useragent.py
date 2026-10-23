@@ -28,7 +28,7 @@ import os
 import platform
 from copy import copy
 from string import ascii_letters, digits
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 from botocore import __version__ as botocore_version
 from botocore.compat import HAS_CRT
@@ -100,6 +100,12 @@ _USERAGENT_FEATURE_MAPPINGS = {
     'CLI_V1_TO_V2_MIGRATION_DEBUG_MODE': '-',
     'CREDENTIALS_PROFILE_LOGIN': 'AC',
     'CREDENTIALS_LOGIN': 'AD',
+    'FLEXIBLE_CHECKSUMS_REQ_MD5': 'AE',
+    'FLEXIBLE_CHECKSUMS_REQ_SHA512': 'AF',
+    'FLEXIBLE_CHECKSUMS_REQ_XXHASH3': 'AG',
+    'FLEXIBLE_CHECKSUMS_REQ_XXHASH64': 'AH',
+    'FLEXIBLE_CHECKSUMS_REQ_XXHASH128': 'AI',
+    'S3_REGION_REDIRECT': 'Ah',
 }
 
 
@@ -188,8 +194,8 @@ class UserAgentComponent(NamedTuple):
 
     prefix: str
     name: str
-    value: Optional[str] = None
-    size_config: Optional[UserAgentComponentSizeConfig] = None
+    value: str | None = None
+    size_config: UserAgentComponentSizeConfig | None = None
 
     def to_string(self):
         """Create string like 'prefix/name#value' from a UserAgentComponent."""

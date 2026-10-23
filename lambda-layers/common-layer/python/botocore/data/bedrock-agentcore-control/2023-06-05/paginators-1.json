@@ -107,6 +107,132 @@
       "output_token": "nextToken",
       "limit_key": "maxResults",
       "result_key": "profileSummaries"
+    },
+    "ListRegistries": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "registries"
+    },
+    "ListRegistryRecords": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "registryRecords"
+    },
+    "ListHarnesses": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "harnesses"
+    },
+    "ListConfigurationBundleVersions": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "versions"
+    },
+    "ListConfigurationBundles": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "bundles"
+    },
+    "ListGatewayRules": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "gatewayRules"
+    },
+    "ListPaymentConnectors": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "paymentConnectors"
+    },
+    "ListPaymentCredentialProviders": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "credentialProviders"
+    },
+    "ListPaymentManagers": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "paymentManagers"
+    },
+    "ListPolicyEngineSummaries": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "policyEngines"
+    },
+    "ListPolicyGenerationSummaries": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "policyGenerations"
+    },
+    "ListPolicySummaries": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "policies"
+    },
+    "ListDatasetExamples": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "examples"
+    },
+    "ListDatasetVersions": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "versions"
+    },
+    "ListDatasets": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "datasets"
+    },
+    "ListHarnessEndpoints": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "endpoints"
+    },
+    "ListHarnessVersions": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "harnessVersions"
+    },
+    "ListAgentRuntimeVersionsByCapacityProvider": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "agentRuntimes"
+    },
+    "ListCapacityProviders": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "capacityProviders"
+    },
+    "ListGatewayRateLimits": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "rateLimits"
+    },
+    "ListConsentPortals": {
+      "input_token": "nextToken",
+      "output_token": "nextToken",
+      "limit_key": "maxResults",
+      "result_key": "consentPortals"
     }
   }
 }

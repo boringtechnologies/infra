@@ -47,6 +47,10 @@ VALID_HOST_LABEL_RE = re.compile(
     r"^(?!-)[a-zA-Z\d-]{1,63}(?<!-)$",
 )
 CACHE_SIZE = 100
+# S3 endpoint ruleset parameters that are defined but not currently referenced.
+# They are excluded from the cache key to avoid cache thrashing when
+# accessing multiple objects in the same bucket.
+S3_UNREFERENCED_PARAMS = {'Key', 'Prefix', 'CopySource'}
 ARN_PARSER = ArnParser()
 STRING_FORMATTER = Formatter()
 
@@ -652,8 +656,16 @@ class RuleSet:
     """Collection of rules to derive a routable service endpoint."""
 
     def __init__(
-        self, version, parameters, rules, partitions, documentation=None
+        self,
+        version,
+        parameters,
+        rules,
+        partitions,
+        documentation=None,
+        **kwargs,
     ):
+        # Unrecognized top-level keys (e.g. ``serviceId``) are ignored so
+        # that additions to the ruleset schema don't break client creation.
         self.version = version
         self.parameters = self._ingest_parameter_spec(parameters)
         self.rules = [RuleCreator.create(**rule) for rule in rules]
@@ -701,11 +713,17 @@ class RuleSet:
 class EndpointProvider:
     """Derives endpoints from a RuleSet for given input parameters."""
 
-    def __init__(self, ruleset_data, partition_data):
+    def __init__(self, ruleset_data, partition_data, excluded_params=None):
         self.ruleset = RuleSet(**ruleset_data, partitions=partition_data)
+        self._excluded_params = excluded_params or frozenset()
+
+    def resolve_endpoint(self, **input_parameters):
+        for param in self._excluded_params:
+            input_parameters.pop(param, None)
+        return self._resolve_endpoint(**input_parameters)
 
     @lru_cache_weakref(maxsize=CACHE_SIZE)
-    def resolve_endpoint(self, **input_parameters):
+    def _resolve_endpoint(self, **input_parameters):
         """Match input parameters to a rule.
 
         :type input_parameters: dict

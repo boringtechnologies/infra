@@ -12,8 +12,8 @@ for LAMBDA_DIR in "$BASE_DIR"/*/; do
     # Remove old zip if it exists
     rm -f "$LAMBDA_DIR$TARGET_ZIP"
 
-    # Change into the Lambda folder and zip handler.py into lambda.zip
-    (cd "$LAMBDA_DIR" && zip -j "$TARGET_ZIP" handler.py)
+    # Include helper modules alongside the Lambda handler.
+    (cd "$LAMBDA_DIR" && zip -j "$TARGET_ZIP" ./*.py)
 
     echo "Created $LAMBDA_DIR$TARGET_ZIP for $DIR_NAME"
 done

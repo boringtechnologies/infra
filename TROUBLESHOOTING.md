@@ -35,11 +35,14 @@ terraform apply -var-file="secrets.tfvars"
 ```
 
 Terraform will:
-1. Detect the change in requirements.txt (via filemd5 trigger)
+1. Detect the change in requirements.txt or the build script
 2. Rebuild the layer zip file using Docker
-3. Detect the change in the zip file (via source_code_hash)
-4. Create a new layer version in AWS
-5. Update Lambda functions to use the new layer version
+3. Create a new layer version in AWS and update Lambda functions to use it
+
+The layer build runs during apply, so Terraform cannot safely calculate a hash
+of the generated ZIP during planning. The layer's `source_code_hash` therefore
+tracks the build resource's identity instead; it stays stable during an apply
+and changes whenever Terraform schedules a rebuild.
 
 #### If You Still Have Issues
 

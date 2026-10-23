@@ -104,9 +104,9 @@ locals {
 
   # Environment variable sets
   env_vars_common = {
-    ACCOUNT_ALIAS    = var.account_alias
-    MONGODB_URI = var.mongodb_uri
-    BASE_URL         = var.base_url
+    ACCOUNT_ALIAS = var.account_alias
+    MONGODB_URI   = var.mongodb_uri
+    BASE_URL      = var.base_url
   }
 
   env_vars_dev = merge(local.env_vars_common, {
@@ -273,20 +273,20 @@ resource "aws_acm_certificate" "domain_certs" {
 
 # DNS validation for all certificates - separate resources per domain to avoid dynamic for_each keys
 resource "aws_route53_record" "cert_validation_boring_tech" {
-  for_each = {
-    for dvo in aws_acm_certificate.domain_certs["boring.tech"].domain_validation_options : dvo.resource_record_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }...
-  }
+  for_each = { validation = true }
 
   allow_overwrite = true
-  name            = each.value[0].name
-  records         = [each.value[0].record]
-  ttl             = 60
-  type            = each.value[0].type
-  zone_id         = local.domain_certificates["boring.tech"].zone_id
+  name = one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["boring.tech"].domain_validation_options : dvo.resource_record_name
+  ]))
+  records = [one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["boring.tech"].domain_validation_options : dvo.resource_record_value
+  ]))]
+  ttl = 60
+  type = one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["boring.tech"].domain_validation_options : dvo.resource_record_type
+  ]))
+  zone_id = local.domain_certificates["boring.tech"].zone_id
 
   lifecycle {
     create_before_destroy = true
@@ -294,20 +294,20 @@ resource "aws_route53_record" "cert_validation_boring_tech" {
 }
 
 resource "aws_route53_record" "cert_validation_boringpsych" {
-  for_each = {
-    for dvo in aws_acm_certificate.domain_certs["boringpsych.com"].domain_validation_options : dvo.resource_record_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }...
-  }
+  for_each = { validation = true }
 
   allow_overwrite = true
-  name            = each.value[0].name
-  records         = [each.value[0].record]
-  ttl             = 60
-  type            = each.value[0].type
-  zone_id         = local.domain_certificates["boringpsych.com"].zone_id
+  name = one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["boringpsych.com"].domain_validation_options : dvo.resource_record_name
+  ]))
+  records = [one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["boringpsych.com"].domain_validation_options : dvo.resource_record_value
+  ]))]
+  ttl = 60
+  type = one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["boringpsych.com"].domain_validation_options : dvo.resource_record_type
+  ]))
+  zone_id = local.domain_certificates["boringpsych.com"].zone_id
 
   lifecycle {
     create_before_destroy = true
@@ -315,20 +315,20 @@ resource "aws_route53_record" "cert_validation_boringpsych" {
 }
 
 resource "aws_route53_record" "cert_validation_jouvencemedicalspa" {
-  for_each = {
-    for dvo in aws_acm_certificate.domain_certs["jouvencemedicalspa.com"].domain_validation_options : dvo.resource_record_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }...
-  }
+  for_each = { validation = true }
 
   allow_overwrite = true
-  name            = each.value[0].name
-  records         = [each.value[0].record]
-  ttl             = 60
-  type            = each.value[0].type
-  zone_id         = local.domain_certificates["jouvencemedicalspa.com"].zone_id
+  name = one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["jouvencemedicalspa.com"].domain_validation_options : dvo.resource_record_name
+  ]))
+  records = [one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["jouvencemedicalspa.com"].domain_validation_options : dvo.resource_record_value
+  ]))]
+  ttl = 60
+  type = one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["jouvencemedicalspa.com"].domain_validation_options : dvo.resource_record_type
+  ]))
+  zone_id = local.domain_certificates["jouvencemedicalspa.com"].zone_id
 
   lifecycle {
     create_before_destroy = true
@@ -336,20 +336,20 @@ resource "aws_route53_record" "cert_validation_jouvencemedicalspa" {
 }
 
 resource "aws_route53_record" "cert_validation_boringmd" {
-  for_each = {
-    for dvo in aws_acm_certificate.domain_certs["boringmd.org"].domain_validation_options : dvo.resource_record_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }...
-  }
+  for_each = { validation = true }
 
   allow_overwrite = true
-  name            = each.value[0].name
-  records         = [each.value[0].record]
-  ttl             = 60
-  type            = each.value[0].type
-  zone_id         = local.domain_certificates["boringmd.org"].zone_id
+  name = one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["boringmd.org"].domain_validation_options : dvo.resource_record_name
+  ]))
+  records = [one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["boringmd.org"].domain_validation_options : dvo.resource_record_value
+  ]))]
+  ttl = 60
+  type = one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["boringmd.org"].domain_validation_options : dvo.resource_record_type
+  ]))
+  zone_id = local.domain_certificates["boringmd.org"].zone_id
 
   lifecycle {
     create_before_destroy = true
@@ -357,24 +357,49 @@ resource "aws_route53_record" "cert_validation_boringmd" {
 }
 
 resource "aws_route53_record" "cert_validation_falconmdpa" {
-  for_each = {
-    for dvo in aws_acm_certificate.domain_certs["falconmdpa.com"].domain_validation_options : dvo.resource_record_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }...
-  }
+  for_each = { validation = true }
 
   allow_overwrite = true
-  name            = each.value[0].name
-  records         = [each.value[0].record]
-  ttl             = 60
-  type            = each.value[0].type
-  zone_id         = local.domain_certificates["falconmdpa.com"].zone_id
+  name = one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["falconmdpa.com"].domain_validation_options : dvo.resource_record_name
+  ]))
+  records = [one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["falconmdpa.com"].domain_validation_options : dvo.resource_record_value
+  ]))]
+  ttl = 60
+  type = one(distinct([
+    for dvo in aws_acm_certificate.domain_certs["falconmdpa.com"].domain_validation_options : dvo.resource_record_type
+  ]))
+  zone_id = local.domain_certificates["falconmdpa.com"].zone_id
 
   lifecycle {
     create_before_destroy = true
   }
+}
+
+moved {
+  from = aws_route53_record.cert_validation_boring_tech["_a654b5e72bd8e69d9a2f782f7fb51848.boring.tech."]
+  to   = aws_route53_record.cert_validation_boring_tech["validation"]
+}
+
+moved {
+  from = aws_route53_record.cert_validation_boringpsych["_25601956cada26796e4ef9f2b5879be9.boringpsych.com."]
+  to   = aws_route53_record.cert_validation_boringpsych["validation"]
+}
+
+moved {
+  from = aws_route53_record.cert_validation_jouvencemedicalspa["_31f76782931b2385bcfbf1fc1f8ea5ea.jouvencemedicalspa.com."]
+  to   = aws_route53_record.cert_validation_jouvencemedicalspa["validation"]
+}
+
+moved {
+  from = aws_route53_record.cert_validation_boringmd["_0fdad0364e19b20e0aa765212c6a2a9c.boringmd.org."]
+  to   = aws_route53_record.cert_validation_boringmd["validation"]
+}
+
+moved {
+  from = aws_route53_record.cert_validation_falconmdpa["_ed578b761f90aadb4c65b670543eb43f.falconmdpa.com."]
+  to   = aws_route53_record.cert_validation_falconmdpa["validation"]
 }
 
 resource "aws_acm_certificate_validation" "domain_certs" {
@@ -394,6 +419,15 @@ resource "aws_acm_certificate_validation" "domain_certs" {
 # Define all your NextJS sites with pipeline config
 locals {
   nextjs_sites = {
+    myworkoutapp-web = {
+      domain_name   = "myworkoutapp.boring.tech"
+      github_repo   = "boringtechnologies/myworkoutapp-web"
+      github_branch = "prod"
+      enable_cicd   = true
+      basic_auth = {
+        enabled = false
+      }
+    }
     wow-web = {
       domain_name   = "wowchicago.boring.tech"
       github_repo   = "boringtechnologies/wow-web"
@@ -604,6 +638,7 @@ module "nextjs_pipelines" {
 resource "null_resource" "build_stripe_layer" {
   triggers = {
     requirements = filemd5("${path.module}/lambda-layers/stripe-layer/requirements.txt")
+    build_script = filesha256("${path.module}/scripts/build-lambda-layer.sh")
   }
 
   provisioner "local-exec" {
@@ -617,7 +652,7 @@ resource "aws_lambda_layer_version" "stripe" {
 
   filename         = "${path.module}/lambda-layers/stripe-layer.zip"
   layer_name       = "boring-stripe-layer"
-  source_code_hash = filebase64sha256("${path.module}/lambda-layers/stripe-layer.zip")
+  source_code_hash = base64sha256(null_resource.build_stripe_layer.id)
 
   compatible_runtimes = ["python3.13"]
 }
@@ -626,6 +661,7 @@ resource "aws_lambda_layer_version" "stripe" {
 resource "null_resource" "build_common_layer" {
   triggers = {
     requirements = filemd5("${path.module}/lambda-layers/common-layer/requirements.txt")
+    build_script = filesha256("${path.module}/scripts/build-lambda-layer.sh")
   }
 
   provisioner "local-exec" {
@@ -638,7 +674,7 @@ resource "aws_lambda_layer_version" "common" {
 
   filename         = "${path.module}/lambda-layers/common-layer.zip"
   layer_name       = "boring-common-layer"
-  source_code_hash = filebase64sha256("${path.module}/lambda-layers/common-layer.zip")
+  source_code_hash = base64sha256(null_resource.build_common_layer.id)
 
   compatible_runtimes = ["python3.13"]
 }
@@ -675,4 +711,96 @@ resource "aws_kms_key_policy" "lambda_encryption" {
       }
     ]
   })
+}
+
+resource "aws_iam_role" "opportunity_digest" {
+  name = "boring-opportunity-digest-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+      Effect = "Allow"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "opportunity_digest_logs" {
+  role       = aws_iam_role.opportunity_digest.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "opportunity_digest" {
+  name = "boring-opportunity-digest-access"
+  role = aws_iam_role.opportunity_digest.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ses:SendEmail"]
+      Resource = "arn:aws:ses:${var.region}:${data.aws_caller_identity.current.account_id}:identity/${try(split("@", var.opportunity_email_from)[1], var.opportunity_email_from)}"
+    }]
+  })
+}
+
+resource "aws_lambda_function" "opportunity_digest" {
+  function_name    = "boring-opportunity-digest"
+  filename         = "${path.module}/modules/lambda/opportunity-digest/lambda.zip"
+  source_code_hash = filebase64sha256("${path.module}/modules/lambda/opportunity-digest/lambda.zip")
+  handler          = "handler.lambda_handler"
+  runtime          = "python3.13"
+  role             = aws_iam_role.opportunity_digest.arn
+  layers           = [aws_lambda_layer_version.common.arn]
+  timeout          = 900
+  memory_size      = 512
+
+  environment {
+    variables = {
+      OPENAI_API_KEY                = var.openai_api_key
+      OPENAI_MODEL                  = var.opportunity_openai_model
+      MONGODB_URI                   = var.mongodb_uri
+      SAM_API_KEY                   = var.sam_api_key
+      BRAVE_SEARCH_API_KEY          = var.brave_search_api_key
+      OPPORTUNITY_EMAIL_TO          = var.opportunity_email_to
+      OPPORTUNITY_EMAIL_FROM        = var.opportunity_email_from
+      MINIMUM_MATCH_SCORE           = tostring(var.opportunity_minimum_score)
+      LOOKBACK_DAYS                 = tostring(var.opportunity_lookback_days)
+      MAX_AI_CANDIDATES_PER_COMPANY = tostring(var.opportunity_max_ai_candidates_per_company)
+      INCLUDE_POSSIBLE_MATCHES      = tostring(var.opportunity_include_possible_matches)
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.opportunity_digest_logs,
+    aws_iam_role_policy.opportunity_digest,
+  ]
+
+  tags = {
+    Project   = "boring"
+    ManagedBy = "Terraform"
+  }
+}
+
+resource "aws_cloudwatch_event_rule" "opportunity_digest" {
+  name                = "boring-opportunity-digest-daily"
+  description         = "Run the business opportunity digest on a configurable schedule"
+  schedule_expression = var.opportunity_schedule
+}
+
+resource "aws_cloudwatch_event_target" "opportunity_digest" {
+  rule      = aws_cloudwatch_event_rule.opportunity_digest.name
+  target_id = "boring-opportunity-digest"
+  arn       = aws_lambda_function.opportunity_digest.arn
+}
+
+resource "aws_lambda_permission" "opportunity_digest_events" {
+  statement_id  = "AllowEventBridgeInvokeOpportunityDigest"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.opportunity_digest.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.opportunity_digest.arn
 }

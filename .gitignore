@@ -5,10 +5,13 @@
 *.tfstate.*
 *.tfvars
 !terraform.tfvars.example
+!secrets.tfvars.example
 
 # Lambda layer zip files and build directories
 lambda-layers/*.zip
 lambda-layers/*/python/
+lambda-layers/*/python/lib/
+lambda-layers/common-layer/*
 
 # Lambda function zip files  
 modules/lambda/*/lambda.zip

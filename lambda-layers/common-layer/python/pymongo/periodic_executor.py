@@ -23,8 +23,7 @@ import time
 import weakref
 from typing import Any, Optional
 
-from pymongo import _csot
-from pymongo._asyncio_task import create_task
+from pymongo import _csot, _op_id
 from pymongo.lock import _create_lock
 
 _IS_SYNC = False
@@ -65,9 +64,9 @@ class AsyncPeriodicExecutor:
         self._stopped = False
 
         if self._task is None or (
-            self._task.done() and not self._task.cancelled() and not self._task.cancelling()  # type: ignore[unused-ignore, attr-defined]
+            self._task.done() and not self._task.cancelled() and not self._task.cancelling()
         ):
-            self._task = create_task(self._run(), name=self._name)
+            self._task = asyncio.create_task(self._run(), name=self._name)
 
     def close(self, dummy: Any = None) -> None:
         """Stop. To restart, call open().
@@ -87,17 +86,18 @@ class AsyncPeriodicExecutor:
         """Execute the target function soon."""
         self._event = True
 
-    def update_interval(self, new_interval: int) -> None:
+    def update_interval(self, new_interval: float) -> None:
         self._interval = new_interval
 
     def skip_sleep(self) -> None:
         self._skip_sleep = True
 
     async def _run(self) -> None:
-        # The CSOT contextvars must be cleared inside the executor task before execution begins
+        # The CSOT and op id contextvars must be cleared inside the executor task before execution begins
         _csot.reset_all()
+        _op_id.reset()
         while not self._stopped:
-            if self._task and self._task.cancelling():  # type: ignore[unused-ignore, attr-defined]
+            if self._task and self._task.cancelling():
                 raise asyncio.CancelledError
             try:
                 if not await self._target():
@@ -118,6 +118,23 @@ class AsyncPeriodicExecutor:
                         break  # Early wake.
 
             self._event = False
+
+
+def _daemon_threads_allowed() -> bool:
+    """Whether daemon threads are allowed in the current interpreter.
+
+    Subinterpreters do not allow daemon threads, so a PeriodicExecutor
+    there runs on a non-daemon thread instead: _shutdown_executors stops
+    and joins it during interpreter shutdown.
+    """
+    # Python 3.12+ exposes the same check CPython itself uses to enforce
+    # the restriction (in the Thread daemon setter), which is reliable in
+    # the current interpreter. On older versions daemon threads are
+    # always allowed.
+    check = getattr(threading, "_daemon_threads_allowed", None)
+    if check is not None:
+        return check()
+    return True
 
 
 class PeriodicExecutor:
@@ -184,7 +201,15 @@ class PeriodicExecutor:
 
         if not started:
             thread = threading.Thread(target=self._run, name=self._name)
-            thread.daemon = True
+            try:
+                # Subinterpreters do not allow daemon threads, so fall back
+                # to a non-daemon thread: _shutdown_executors stops and
+                # joins it during interpreter shutdown.
+                thread.daemon = _daemon_threads_allowed()
+            except RuntimeError:
+                # The restriction is enforced when the thread is started,
+                # handled below.
+                pass
             self._thread = weakref.proxy(thread)
             _register_executor(self)
             # Mitigation to RuntimeError firing when thread starts on shutdown
@@ -195,7 +220,13 @@ class PeriodicExecutor:
                 if "interpreter shutdown" in str(e) or sys.is_finalizing():
                     self._thread = None
                     return
-                raise
+                if not thread.daemon:
+                    raise
+                # Some Python versions only enforce the subinterpreter daemon
+                # restriction when the thread is started, so fall back to a
+                # non-daemon thread as above.
+                thread.daemon = False
+                thread.start()
 
     def close(self, dummy: Any = None) -> None:
         """Stop. To restart, call open().
@@ -217,7 +248,7 @@ class PeriodicExecutor:
         """Execute the target function soon."""
         self._event = True
 
-    def update_interval(self, new_interval: int) -> None:
+    def update_interval(self, new_interval: float) -> None:
         self._interval = new_interval
 
     def skip_sleep(self) -> None:
